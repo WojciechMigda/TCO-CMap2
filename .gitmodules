@@ -1,0 +1,3 @@
+[submodule "cpplinq"]
+	path = cpplinq
+	url = https://github.com/mrange/cpplinq.git
