@@ -41,7 +41,7 @@ std::vector<Tp> loadFromFile(char const * fname, std::size_t pos, int nelem)
 
     if (ifile)
     {
-        fseek(ifile, pos, SEEK_SET);
+        fseek(ifile, pos * sizeof (Tp), SEEK_SET);
         int nread = fread(&ret[0], sizeof (Tp), nelem, ifile);
         fclose(ifile);
         if (UNLIKELY(nread != nelem))

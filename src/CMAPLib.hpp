@@ -28,8 +28,10 @@
 #include <cstddef>
 #include <string>
 
-struct CMAPLib
+#ifndef NO_CMAPLIB_DEF
+class CMAPLib
 {
+public:
     std::vector<double>
     loadFromDoubleFile(std::string const & fname, std::size_t pos, int nelem);
 
@@ -42,5 +44,6 @@ struct CMAPLib
     int
     saveDoubleFile(std::string const & fname, std::vector<double> const & data);
 };
+#endif
 
 #endif /* SRC_CMAPLIB_HPP_ */
