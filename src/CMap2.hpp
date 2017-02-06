@@ -28,6 +28,7 @@
 #include "query_parser.hpp"
 
 #include "cpplinq.hpp"
+#include "likely.h"
 
 #include <vector>
 #include <string>
@@ -136,7 +137,7 @@ CMAP2Updated::getWTKScomb(std::vector<std::string> & q_up, std::vector<std::stri
             auto const QUSIZE = q_up_indices.size();
             auto const QDSIZE = q_dn_indices.size();
 
-            std::vector<std::pair<int, double>> up_ranks;
+            std::vector<std::pair<std::uint16_t, std::uint16_t>> up_ranks;
             up_ranks.reserve(QUSIZE);
             double Sum_up_abs_scores = 0.;
             std::transform(q_up_indices.cbegin(), q_up_indices.cend(), std::back_inserter(up_ranks),
@@ -144,10 +145,10 @@ CMAP2Updated::getWTKScomb(std::vector<std::string> & q_up, std::vector<std::stri
                 {
                     auto abs_score = std::abs(sig.at(ix));
                     Sum_up_abs_scores += abs_score;
-                    return std::make_pair(ranks.at(ix), abs_score);
+                    return std::make_pair<std::uint16_t, std::uint16_t>(ranks.at(ix), ix);
                 });
 
-            std::vector<std::pair<int, double>> dn_ranks;
+            std::vector<std::pair<std::uint16_t, std::uint16_t>> dn_ranks;
             dn_ranks.reserve(QDSIZE);
             double Sum_dn_abs_scores = 0.;
             std::transform(q_dn_indices.cbegin(), q_dn_indices.cend(), std::back_inserter(dn_ranks),
@@ -155,22 +156,22 @@ CMAP2Updated::getWTKScomb(std::vector<std::string> & q_up, std::vector<std::stri
                 {
                     auto abs_score = std::abs(sig.at(ix));
                     Sum_dn_abs_scores += abs_score;
-                    return std::make_pair(ranks.at(ix), abs_score);
+                    return std::make_pair<std::uint16_t, std::uint16_t>(ranks.at(ix), ix);
                 });
 
             std::qsort(&up_ranks[0], up_ranks.size(), sizeof (up_ranks.front()),
                 [](const void * avp, const void * bvp)
                 {
-                    auto ap = static_cast<std::pair<int, double> const *>(avp);
-                    auto bp = static_cast<std::pair<int, double> const *>(bvp);
+                    auto ap = static_cast<std::pair<std::uint16_t, std::uint16_t> const *>(avp);
+                    auto bp = static_cast<std::pair<std::uint16_t, std::uint16_t> const *>(bvp);
                     return (ap->first > bp->first) - (ap->first < bp->first);
                 }
             );
             std::qsort(&dn_ranks[0], dn_ranks.size(), sizeof (dn_ranks.front()),
                 [](const void * avp, const void * bvp)
                 {
-                    auto ap = static_cast<std::pair<int, double> const *>(avp);
-                    auto bp = static_cast<std::pair<int, double> const *>(bvp);
+                    auto ap = static_cast<std::pair<std::uint16_t, std::uint16_t> const *>(avp);
+                    auto bp = static_cast<std::pair<std::uint16_t, std::uint16_t> const *>(bvp);
                     return (ap->first > bp->first) - (ap->first < bp->first);
                 }
             );
@@ -185,16 +186,16 @@ CMAP2Updated::getWTKScomb(std::vector<std::string> & q_up, std::vector<std::stri
                 {
                     _acc += (rs.first - prev - 1) * upenalty;
                     auto abs_acc = std::abs(_acc);
-                    if (abs_acc > _extr)
+                    if (UNLIKELY(abs_acc > _extr))
                     {
                         _extr = abs_acc;
                         wkts_up = _acc;
                     }
                     prev = rs.first;
 
-                    _acc += rs.second / Sum_up_abs_scores;
+                    _acc += std::abs(sig[rs.second]) / Sum_up_abs_scores;
                     abs_acc = std::abs(_acc);
-                    if (abs_acc > _extr)
+                    if (UNLIKELY(abs_acc > _extr))
                     {
                         _extr = abs_acc;
                         wkts_up = _acc;
@@ -212,16 +213,16 @@ CMAP2Updated::getWTKScomb(std::vector<std::string> & q_up, std::vector<std::stri
                 {
                     _acc += (rs.first - prev - 1) * dpenalty;
                     auto abs_acc = std::abs(_acc);
-                    if (abs_acc > _extr)
+                    if (UNLIKELY(abs_acc > _extr))
                     {
                         _extr = abs_acc;
                         wkts_dn = _acc;
                     }
                     prev = rs.first;
 
-                    _acc += rs.second / Sum_dn_abs_scores;
+                    _acc += std::abs(sig[rs.second]) / Sum_dn_abs_scores;
                     abs_acc = std::abs(_acc);
-                    if (abs_acc > _extr)
+                    if (UNLIKELY(abs_acc > _extr))
                     {
                         _extr = abs_acc;
                         wkts_dn = _acc;
@@ -232,7 +233,7 @@ CMAP2Updated::getWTKScomb(std::vector<std::string> & q_up, std::vector<std::stri
             auto wkts = (wkts_dn * wkts_up < 0.) ? (wkts_up - wkts_dn) / 2 : 0.;
             //std::cout << "wkts : " << wkts << "\n";
             ret.push_back(wkts);
-            if (m_gt)
+            if (UNLIKELY(m_gt != nullptr))
             {
                 auto ref = (*m_gt)[six * NQRY + qix];
                 if (std::abs(ref - wkts) >= 0.001)
