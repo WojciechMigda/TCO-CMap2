@@ -68,9 +68,6 @@ int main(int argc, char **argv)
         >> q::to_vector()
         ;
 
-    std::cout << up_query.size() << "\n";
-    std::cout << "up query front() : " << up_query.front() << "\n";
-
     ////////////////////////////////////////////////////////////////////////////
 
 
