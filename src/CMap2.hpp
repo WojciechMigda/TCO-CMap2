@@ -137,95 +137,87 @@ CMAP2Updated::getWTKScomb(std::vector<std::string> & q_up, std::vector<std::stri
             auto const QUSIZE = q_up_indices.size();
             auto const QDSIZE = q_dn_indices.size();
 
-            std::vector<std::pair<std::uint16_t, std::uint16_t>> up_ranks;
-            up_ranks.reserve(QUSIZE);
+            std::vector<std::pair<std::uint16_t, std::int16_t>> up_dn_ranks;
+            up_dn_ranks.reserve(QUSIZE + QDSIZE);
             double Sum_up_abs_scores = 0.;
-            std::transform(q_up_indices.cbegin(), q_up_indices.cend(), std::back_inserter(up_ranks),
+            std::transform(q_up_indices.cbegin(), q_up_indices.cend(), std::back_inserter(up_dn_ranks),
                 [&ranks, &sig, &Sum_up_abs_scores](int ix)
                 {
                     auto abs_score = std::abs(sig.at(ix));
                     Sum_up_abs_scores += abs_score;
-                    return std::make_pair<std::uint16_t, std::uint16_t>(ranks.at(ix), ix);
+                    return std::make_pair<std::uint16_t, std::int16_t>(ranks.at(ix), ix);
                 });
 
-            std::vector<std::pair<std::uint16_t, std::uint16_t>> dn_ranks;
-            dn_ranks.reserve(QDSIZE);
+            //std::vector<std::pair<std::uint16_t, std::uint16_t>> dn_ranks;
+            //dn_ranks.reserve(QDSIZE);
             double Sum_dn_abs_scores = 0.;
-            std::transform(q_dn_indices.cbegin(), q_dn_indices.cend(), std::back_inserter(dn_ranks),
+            std::transform(q_dn_indices.cbegin(), q_dn_indices.cend(), std::back_inserter(up_dn_ranks),
                 [&ranks, &sig, &Sum_dn_abs_scores](int ix)
                 {
                     auto abs_score = std::abs(sig.at(ix));
                     Sum_dn_abs_scores += abs_score;
-                    return std::make_pair<std::uint16_t, std::uint16_t>(ranks.at(ix), ix);
+                    return std::make_pair<std::uint16_t, std::int16_t>(ranks.at(ix), -ix - 1); // neg index to indicate 'down'
                 });
 
-            std::qsort(&up_ranks[0], up_ranks.size(), sizeof (up_ranks.front()),
+            std::qsort(&up_dn_ranks[0], up_dn_ranks.size(), sizeof (up_dn_ranks.front()),
                 [](const void * avp, const void * bvp)
                 {
-                    auto ap = static_cast<std::pair<std::uint16_t, std::uint16_t> const *>(avp);
-                    auto bp = static_cast<std::pair<std::uint16_t, std::uint16_t> const *>(bvp);
-                    return (ap->first > bp->first) - (ap->first < bp->first);
-                }
-            );
-            std::qsort(&dn_ranks[0], dn_ranks.size(), sizeof (dn_ranks.front()),
-                [](const void * avp, const void * bvp)
-                {
-                    auto ap = static_cast<std::pair<std::uint16_t, std::uint16_t> const *>(avp);
-                    auto bp = static_cast<std::pair<std::uint16_t, std::uint16_t> const *>(bvp);
+                    auto ap = static_cast<std::pair<std::uint16_t, std::int16_t> const *>(avp);
+                    auto bp = static_cast<std::pair<std::uint16_t, std::int16_t> const *>(bvp);
                     return (ap->first > bp->first) - (ap->first < bp->first);
                 }
             );
 
             double const upenalty = -1. / (NGENES - QUSIZE);
-            double wkts_up = 0.;
-            {
-                double _acc = 0.;
-                double _extr = 0.;
-                int prev = 0; // rank indices are 1-based
-                for (auto const & rs : up_ranks)
-                {
-                    _acc += (rs.first - prev - 1) * upenalty;
-                    auto abs_acc = std::abs(_acc);
-                    if (UNLIKELY(abs_acc > _extr))
-                    {
-                        _extr = abs_acc;
-                        wkts_up = _acc;
-                    }
-                    prev = rs.first;
-
-                    _acc += std::abs(sig[rs.second]) / Sum_up_abs_scores;
-                    abs_acc = std::abs(_acc);
-                    if (UNLIKELY(abs_acc > _extr))
-                    {
-                        _extr = abs_acc;
-                        wkts_up = _acc;
-                    }
-                }
-            }
-
             double const dpenalty = -1. / (NGENES - QDSIZE);
+            double wkts_up = 0.;
             double wkts_dn = 0.;
             {
-                double _acc = 0.;
-                double _extr = 0.;
-                int prev = 0; // rank indices are 1-based
-                for (auto const & rs : dn_ranks)
+                double up_acc = 0.;
+                double up_extr = 0.;
+                double dn_acc = 0.;
+                double dn_extr = 0.;
+                int up_prev = 0; // rank indices are 1-based
+                int dn_prev = 0; // rank indices are 1-based
+                for (auto const & rs : up_dn_ranks)
                 {
-                    _acc += (rs.first - prev - 1) * dpenalty;
-                    auto abs_acc = std::abs(_acc);
-                    if (UNLIKELY(abs_acc > _extr))
+                    if (rs.second >= 0)
                     {
-                        _extr = abs_acc;
-                        wkts_dn = _acc;
-                    }
-                    prev = rs.first;
+                        up_acc += (rs.first - up_prev - 1) * upenalty;
+                        auto abs_acc = std::abs(up_acc);
+                        if (UNLIKELY(abs_acc > up_extr))
+                        {
+                            up_extr = abs_acc;
+                            wkts_up = up_acc;
+                        }
+                        up_prev = rs.first;
 
-                    _acc += std::abs(sig[rs.second]) / Sum_dn_abs_scores;
-                    abs_acc = std::abs(_acc);
-                    if (UNLIKELY(abs_acc > _extr))
+                        up_acc += std::abs(sig[rs.second]) / Sum_up_abs_scores;
+                        abs_acc = std::abs(up_acc);
+                        if (UNLIKELY(abs_acc > up_extr))
+                        {
+                            up_extr = abs_acc;
+                            wkts_up = up_acc;
+                        }
+                    }
+                    if (rs.second < 0)
                     {
-                        _extr = abs_acc;
-                        wkts_dn = _acc;
+                        dn_acc += (rs.first - dn_prev - 1) * dpenalty;
+                        auto abs_acc = std::abs(dn_acc);
+                        if (UNLIKELY(abs_acc > dn_extr))
+                        {
+                            dn_extr = abs_acc;
+                            wkts_dn = dn_acc;
+                        }
+                        dn_prev = rs.first;
+
+                        dn_acc += std::abs(sig[-rs.second - 1]) / Sum_dn_abs_scores;
+                        abs_acc = std::abs(dn_acc);
+                        if (UNLIKELY(abs_acc > dn_extr))
+                        {
+                            dn_extr = abs_acc;
+                            wkts_dn = dn_acc;
+                        }
                     }
                 }
             }
