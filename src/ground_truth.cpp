@@ -35,13 +35,14 @@
 #include <cmath>
 #include <vector>
 
-std::vector<double> load_gt_from_csv(std::vector<std::string> && vs)
+std::vector<double> load_gt_from_csv(std::vector<std::string> && vs, std::size_t nsig, std::size_t nskip)
 {
     std::vector<double> ret;
 
     namespace q = ::cpplinq;
     q::from(vs)
-        >> q::skip(1)
+        >> q::skip(1 + nskip)
+        >> q::take(nsig)
         >> q::select([](std::string const & s)
             {
                 return s.substr(s.find(',') + 1);

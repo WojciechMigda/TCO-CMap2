@@ -27,6 +27,6 @@
 #include <vector>
 #include <string>
 
-std::vector<double> load_gt_from_csv(std::vector<std::string> && vs);
+std::vector<double> load_gt_from_csv(std::vector<std::string> && vs, std::size_t nsig, std::size_t nskip);
 
 #endif /* SRC_GROUND_TRUTH_HPP_ */
