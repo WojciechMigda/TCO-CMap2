@@ -148,33 +148,9 @@ CMAP2Updated::getWTKScomb(std::vector<std::string> & q_up, std::vector<std::stri
                     return std::make_pair<std::uint16_t, std::uint16_t>(ranks.at(ix), ix);
                 });
 
-            std::vector<std::pair<std::uint16_t, std::uint16_t>> dn_ranks;
-            dn_ranks.reserve(QDSIZE);
-            double Sum_dn_abs_scores = 0.;
-            std::transform(q_dn_indices.cbegin(), q_dn_indices.cend(), std::back_inserter(dn_ranks),
-                [&ranks, &sig, &Sum_dn_abs_scores](int ix)
-                {
-                    auto abs_score = std::abs(sig.at(ix));
-                    Sum_dn_abs_scores += abs_score;
-                    return std::make_pair<std::uint16_t, std::uint16_t>(ranks.at(ix), ix);
-                });
-
-            std::qsort(&up_ranks[0], up_ranks.size(), sizeof (up_ranks.front()),
-                [](const void * avp, const void * bvp)
-                {
-                    auto ap = static_cast<std::pair<std::uint16_t, std::uint16_t> const *>(avp);
-                    auto bp = static_cast<std::pair<std::uint16_t, std::uint16_t> const *>(bvp);
-                    return (ap->first > bp->first) - (ap->first < bp->first);
-                }
-            );
-            std::qsort(&dn_ranks[0], dn_ranks.size(), sizeof (dn_ranks.front()),
-                [](const void * avp, const void * bvp)
-                {
-                    auto ap = static_cast<std::pair<std::uint16_t, std::uint16_t> const *>(avp);
-                    auto bp = static_cast<std::pair<std::uint16_t, std::uint16_t> const *>(bvp);
-                    return (ap->first > bp->first) - (ap->first < bp->first);
-                }
-            );
+            std::sort(up_ranks.begin(), up_ranks.end(),
+                [](std::pair<std::uint16_t, std::uint16_t> const & p, std::pair<std::uint16_t, std::uint16_t> const & q)
+                { return p.first < q.first;});
 
             double const upenalty = -1. / (NGENES - QUSIZE);
             double wkts_up = 0.;
@@ -202,6 +178,21 @@ CMAP2Updated::getWTKScomb(std::vector<std::string> & q_up, std::vector<std::stri
                     }
                 }
             }
+
+            std::vector<std::pair<std::uint16_t, std::uint16_t>> dn_ranks;
+            dn_ranks.reserve(QDSIZE);
+            double Sum_dn_abs_scores = 0.;
+            std::transform(q_dn_indices.cbegin(), q_dn_indices.cend(), std::back_inserter(dn_ranks),
+                [&ranks, &sig, &Sum_dn_abs_scores](int ix)
+                {
+                    auto abs_score = std::abs(sig.at(ix));
+                    Sum_dn_abs_scores += abs_score;
+                    return std::make_pair<std::uint16_t, std::uint16_t>(ranks.at(ix), ix);
+                });
+
+            std::sort(dn_ranks.begin(), dn_ranks.end(),
+                [](std::pair<std::uint16_t, std::uint16_t> const & p, std::pair<std::uint16_t, std::uint16_t> const & q)
+                { return p.first < q.first;});
 
             double const dpenalty = -1. / (NGENES - QDSIZE);
             double wkts_dn = 0.;
