@@ -146,9 +146,9 @@ CMAP2Updated::getWTKScomb(std::vector<std::string> & q_up, std::vector<std::stri
             std::transform(q_up_indices.cbegin(), q_up_indices.cend(), std::back_inserter(up_ranks),
                 [&ranks, &sig, &Sum_up_abs_scores](int ix)
                 {
-                    auto abs_score = std::abs(sig.at(ix));
+                    auto abs_score = std::abs(sig[ix]);
                     Sum_up_abs_scores += abs_score;
-                    return std::make_pair<std::uint16_t, std::uint16_t>(ranks.at(ix), ix);
+                    return std::make_pair<std::uint16_t, std::uint16_t>(ranks[ix], ix);
                 });
 
             std::sort(up_ranks.begin(), up_ranks.end(),
@@ -188,9 +188,9 @@ CMAP2Updated::getWTKScomb(std::vector<std::string> & q_up, std::vector<std::stri
             std::transform(q_dn_indices.cbegin(), q_dn_indices.cend(), std::back_inserter(dn_ranks),
                 [&ranks, &sig, &Sum_dn_abs_scores](int ix)
                 {
-                    auto abs_score = std::abs(sig.at(ix));
+                    auto abs_score = std::abs(sig[ix]);
                     Sum_dn_abs_scores += abs_score;
-                    return std::make_pair<std::uint16_t, std::uint16_t>(ranks.at(ix), ix);
+                    return std::make_pair<std::uint16_t, std::uint16_t>(ranks[ix], ix);
                 });
 
             std::sort(dn_ranks.begin(), dn_ranks.end(),
