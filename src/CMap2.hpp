@@ -56,8 +56,8 @@ struct CMAP2Updated
 {
     enum {NGENES = 10174};
 
-    CMAP2Updated(size_type nsig = 476251, std::string path = "", std::vector<double> const * gt = nullptr) :
-        NSIG(nsig), PATH(path), m_gt(gt)
+    CMAP2Updated(size_type nsig = 476251, size_type nskip = 0, std::string path = "", std::vector<double> const * gt = nullptr) :
+        NSIG(nsig), NSKIP(nskip), PATH(path), m_gt(gt)
     {}
 
     int init(std::vector<int> const & genes);
@@ -65,6 +65,7 @@ struct CMAP2Updated
     std::vector<double> getWTKScomb_(std::vector<std::string> & q_up, std::vector<std::string> & q_dn);
 
     size_type const NSIG;
+    size_type const NSKIP;
     std::string const PATH;
     std::vector<double> const * m_gt;
     std::unordered_map<int, int> m_gene_to_idx;
@@ -95,6 +96,8 @@ CMAP2Updated::init(std::vector<int> const & genes)
 std::vector<double>
 CMAP2Updated::getWTKScomb(std::vector<std::string> & q_up, std::vector<std::string> & q_dn)
 {
+    std::cerr << "Will process " << NSIG - NSKIP << " signatures, [" << NSKIP << ',' << NSIG << ")\n";
+
     const auto time0 = timestamp();
 
     assert(q_up.size() == q_dn.size());
@@ -123,7 +126,7 @@ CMAP2Updated::getWTKScomb(std::vector<std::string> & q_up, std::vector<std::stri
     std::vector<double> ret;
     ret.reserve(q_up.size() * NSIG);
 
-    for (auto six = 0u; six < NSIG; ++six)
+    for (auto six = NSKIP; six < NSIG; ++six)
     {
         sig = m_cmap_lib.loadFromDoubleFile(PATH + "scoresBySig", six * NGENES, NGENES);
         ranks = m_cmap_lib.loadFromIntFile(PATH + "ranksBySig", six * NGENES, NGENES);
@@ -226,10 +229,11 @@ CMAP2Updated::getWTKScomb(std::vector<std::string> & q_up, std::vector<std::stri
             ret.push_back(wkts);
             if (UNLIKELY(m_gt != nullptr))
             {
-                auto ref = (*m_gt)[six * NQRY + qix];
+                auto ref = (*m_gt)[(six - NSKIP) * NQRY + qix];
                 if (std::abs(ref - wkts) >= 0.001)
                 {
-                    std::cout << "Ref: " << ref << " WKTS: " << wkts << " up/dn " << wkts_up << ' ' << wkts_dn << '\n';
+                    std::cout << "Sig: " << six + 1 << ", Query: " << qix + 1 \
+                        << " Ref: " << ref << " WKTS: " << wkts << " up/dn " << wkts_up << ' ' << wkts_dn << '\n';
                 }
             }
         }

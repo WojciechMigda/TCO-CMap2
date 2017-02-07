@@ -72,10 +72,19 @@ int main(int argc, char **argv)
 
 
     std::cout << "[main] Loading ground-truth\n";
-    auto const gt = args.at("gt-csv").as<std::string>().size() > 0 ? load_gt_from_csv(read_file(args.at("gt-csv").as<std::string>().c_str())) : std::vector<double>();
+    auto const gt = args.at("gt").as<std::string>().size() > 0 ?
+        load_gt_from_csv(
+            read_file(args.at("gt").as<std::string>().c_str()),
+            args.at("nsig").as<unsigned int>(),
+            args.at("nskip").as<unsigned int>()) :
+        std::vector<double>();
     std::cout << "[main] Done\n";
 
-    CMAP2Updated solver(args.at("nsig").as<unsigned int>(), "../data/", gt.size() ? &gt : nullptr);
+    CMAP2Updated solver(
+        args.at("nsig").as<unsigned int>(),
+        args.at("nskip").as<unsigned int>(),
+        "../data/",
+        gt.size() ? &gt : nullptr);
 
     auto genes = solver.m_cmap_lib.loadFromIntFile("../data/genes.bin", 0, 10174);
     solver.init(genes);
