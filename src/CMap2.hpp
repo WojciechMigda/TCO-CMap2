@@ -126,6 +126,9 @@ CMAP2Updated::getWTKScomb(std::vector<std::string> & q_up, std::vector<std::stri
     std::vector<double> ret;
     ret.reserve(q_up.size() * NSIG);
 
+    std::vector<std::pair<std::uint16_t, std::uint16_t>> up_ranks;
+    std::vector<std::pair<std::uint16_t, std::uint16_t>> dn_ranks;
+
     for (auto six = NSKIP; six < NSIG; ++six)
     {
         sig = m_cmap_lib.loadFromDoubleFile(PATH + "scoresBySig", six * NGENES, NGENES);
@@ -140,7 +143,7 @@ CMAP2Updated::getWTKScomb(std::vector<std::string> & q_up, std::vector<std::stri
             auto const QUSIZE = q_up_indices.size();
             auto const QDSIZE = q_dn_indices.size();
 
-            std::vector<std::pair<std::uint16_t, std::uint16_t>> up_ranks;
+            up_ranks.clear();
             up_ranks.reserve(QUSIZE);
             double Sum_up_abs_scores = 0.;
             std::transform(q_up_indices.cbegin(), q_up_indices.cend(), std::back_inserter(up_ranks),
@@ -182,7 +185,7 @@ CMAP2Updated::getWTKScomb(std::vector<std::string> & q_up, std::vector<std::stri
                 }
             }
 
-            std::vector<std::pair<std::uint16_t, std::uint16_t>> dn_ranks;
+            dn_ranks.clear();
             dn_ranks.reserve(QDSIZE);
             double Sum_dn_abs_scores = 0.;
             std::transform(q_dn_indices.cbegin(), q_dn_indices.cend(), std::back_inserter(dn_ranks),
