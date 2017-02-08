@@ -139,6 +139,8 @@ CMAP2Updated::getWTKScomb(std::vector<std::string> & q_up, std::vector<std::stri
     {
         sig = m_cmap_lib.loadFromDoubleFile(PATH + "scoresBySig", six * NGENES, NGENES);
         ranks = m_cmap_lib.loadFromIntFile(PATH + "ranksBySig", six * NGENES, NGENES);
+        double const * sig_p = sig.data();
+        unsigned int const * ranks_p = (unsigned int const *)ranks.data();
         // cache i/o ???
 
         for (auto qix = 0u; qix < NQRY; ++qix)
@@ -149,7 +151,7 @@ CMAP2Updated::getWTKScomb(std::vector<std::string> & q_up, std::vector<std::stri
             auto const QUSIZE = q_up_indices.size();
             auto const QDSIZE = q_dn_indices.size();
 
-            auto calc_wtks = [&hranks, &ranks, &sig](size_type const QSIZE, std::vector<std::uint16_t> const & q_indices)
+            auto calc_wtks = [&hranks, ranks_p, sig_p](size_type const QSIZE, std::vector<std::uint16_t> const & q_indices)
             {
                 double Sum_abs_scores = 0.;
 
@@ -159,12 +161,13 @@ CMAP2Updated::getWTKScomb(std::vector<std::string> & q_up, std::vector<std::stri
                 }
                 for (auto const ix : q_indices)
                 {
-                    auto abs_score = std::abs(sig[ix]);
+                    auto abs_score = std::abs(sig_p[ix]);
                     Sum_abs_scores += abs_score;
-                    hranks[ranks[ix] / RANK_PER_BUCKET].emplace_back(ranks[ix], ix);
+                    hranks[ranks_p[ix] / RANK_PER_BUCKET].emplace_back(ranks_p[ix], ix);
                 }
                 for (auto & bucket : hranks)
                 {
+                    //std::pair<std::uint16_t, std::uint16_t> * bucket_p = bucket.data();
                     std::sort(bucket.begin(), bucket.end(),
                         [](std::pair<std::uint16_t, std::uint16_t> const & p, std::pair<std::uint16_t, std::uint16_t> const & q)
                         { return p.first < q.first;});
@@ -186,7 +189,7 @@ CMAP2Updated::getWTKScomb(std::vector<std::string> & q_up, std::vector<std::stri
 
                         prev = rs.first;
 
-                        _acc += std::abs(sig[rs.second]) / Sum_abs_scores;
+                        _acc += std::abs(sig_p[rs.second]) / Sum_abs_scores;
                         _max = std::max(_max, _acc);
                     }
                 }
