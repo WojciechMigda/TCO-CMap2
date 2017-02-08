@@ -114,7 +114,8 @@ CMAP2Updated::getWTKScomb(std::vector<std::string> & q_up, std::vector<std::stri
                         auto q_parsed = parse_query(s);
                         std::transform(q_parsed.begin(), q_parsed.end(), q_parsed.begin(),
                             [this](int gene_id){ return this->m_gene_to_idx.at(gene_id); });
-                        return q_parsed;
+                        return std::vector<std::uint16_t>(q_parsed.cbegin(), q_parsed.cend());
+                        //return q_parsed;
                     })
                 >> q::to_vector();
         };
@@ -126,12 +127,12 @@ CMAP2Updated::getWTKScomb(std::vector<std::string> & q_up, std::vector<std::stri
     std::vector<int> ranks;
 
     std::vector<double> ret;
-    ret.reserve(q_up.size() * NSIG);
+    ret.reserve(NQRY * NSIG);
 
     std::vector<std::pair<std::uint16_t, std::uint16_t>> hranks[NBUCKET];
     for (auto & bucket : hranks)
     {
-        bucket.reserve(250 / (4 * NBUCKET));
+        bucket.reserve(250 / (2 * NBUCKET));
     }
 
     for (auto six = NSKIP; six < NSIG; ++six)
@@ -148,110 +149,71 @@ CMAP2Updated::getWTKScomb(std::vector<std::string> & q_up, std::vector<std::stri
             auto const QUSIZE = q_up_indices.size();
             auto const QDSIZE = q_dn_indices.size();
 
-            double Sum_up_abs_scores = 0.;
+            auto calc_wtks = [&hranks, &ranks, &sig](size_type const QSIZE, std::vector<std::uint16_t> const & q_indices)
+            {
+                double Sum_abs_scores = 0.;
 
-            for (auto & bucket : hranks)
-            {
-                bucket.clear();
-            }
-            for (auto const ix : q_up_indices)
-            {
-                auto abs_score = std::abs(sig[ix]);
-                Sum_up_abs_scores += abs_score;
-                hranks[ranks[ix] / RANK_PER_BUCKET].emplace_back(ranks[ix], ix);
-            }
-            for (auto & bucket : hranks)
-            {
-                std::sort(bucket.begin(), bucket.end(),
-                    [](std::pair<std::uint16_t, std::uint16_t> const & p, std::pair<std::uint16_t, std::uint16_t> const & q)
-                    { return p.first < q.first;});
-            }
-
-            double const upenalty = -1. / (NGENES - QUSIZE);
-            double wkts_up = 0.;
-            double _acc = 0.;
-            double _extr = 0.;
-            int prev = 0; // rank indices are 1-based
-
-            for (auto const bucket : hranks)
-            {
-                for (auto const & rs : bucket)
+                for (auto & bucket : hranks)
                 {
-                    _acc += (rs.first - prev - 1) * upenalty;
-                    auto abs_acc = std::abs(_acc);
-                    if (UNLIKELY(abs_acc > _extr))
-                    {
-                        _extr = abs_acc;
-                        wkts_up = _acc;
-                    }
-                    prev = rs.first;
+                    bucket.clear();
+                }
+                for (auto const ix : q_indices)
+                {
+                    auto abs_score = std::abs(sig[ix]);
+                    Sum_abs_scores += abs_score;
+                    hranks[ranks[ix] / RANK_PER_BUCKET].emplace_back(ranks[ix], ix);
+                }
+                for (auto & bucket : hranks)
+                {
+                    std::sort(bucket.begin(), bucket.end(),
+                        [](std::pair<std::uint16_t, std::uint16_t> const & p, std::pair<std::uint16_t, std::uint16_t> const & q)
+                        { return p.first < q.first;});
+                }
 
-                    _acc += std::abs(sig[rs.second]) / Sum_up_abs_scores;
-                    abs_acc = std::abs(_acc);
-                    if (UNLIKELY(abs_acc > _extr))
+                double const penalty = -1. / (NGENES - QSIZE);
+                double wtks = 0.;
+                double _acc = 0.;
+                double _min = 0.;
+                double _max = 0.;
+                int prev = 0; // rank indices are 1-based
+
+                for (auto const & bucket : hranks)
+                {
+                    for (auto const & rs : bucket)
                     {
-                        _extr = abs_acc;
-                        wkts_up = _acc;
+                        _acc += (rs.first - prev - 1) * penalty;
+                        _min = std::min(_min, _acc);
+
+                        prev = rs.first;
+
+                        _acc += std::abs(sig[rs.second]) / Sum_abs_scores;
+                        _max = std::max(_max, _acc);
                     }
                 }
-            }
-
-            double Sum_dn_abs_scores = 0.;
-            for (auto & bucket : hranks)
-            {
-                bucket.clear();
-            }
-            for (auto const ix : q_dn_indices)
-            {
-                auto abs_score = std::abs(sig[ix]);
-                Sum_dn_abs_scores += abs_score;
-                hranks[ranks[ix] / RANK_PER_BUCKET].emplace_back(ranks[ix], ix);
-            }
-            for (auto & bucket : hranks)
-            {
-                std::sort(bucket.begin(), bucket.end(),
-                    [](std::pair<std::uint16_t, std::uint16_t> const & p, std::pair<std::uint16_t, std::uint16_t> const & q)
-                    { return p.first < q.first;});
-            }
-
-            double const dpenalty = -1. / (NGENES - QDSIZE);
-            double wkts_dn = 0.;
-            /*double*/ _acc = 0.;
-            /*double*/ _extr = 0.;
-            /*int*/ prev = 0; // rank indices are 1-based
-            for (auto const bucket : hranks)
-            {
-                for (auto const & rs : bucket)
+                if (_max > std::abs(_min))
                 {
-                    _acc += (rs.first - prev - 1) * dpenalty;
-                    auto abs_acc = std::abs(_acc);
-                    if (UNLIKELY(abs_acc > _extr))
-                    {
-                        _extr = abs_acc;
-                        wkts_dn = _acc;
-                    }
-                    prev = rs.first;
-
-                    _acc += std::abs(sig[rs.second]) / Sum_dn_abs_scores;
-                    abs_acc = std::abs(_acc);
-                    if (UNLIKELY(abs_acc > _extr))
-                    {
-                        _extr = abs_acc;
-                        wkts_dn = _acc;
-                    }
+                    wtks = _max;
                 }
-            }
+                else
+                {
+                    wtks = _min;
+                }
+                return wtks;
+            };
 
-            auto wkts = (wkts_dn * wkts_up < 0.) ? (wkts_up - wkts_dn) / 2 : 0.;
-            //std::cout << "wkts : " << wkts << "\n";
-            ret.push_back(wkts);
+            auto const wtks_up = calc_wtks(QUSIZE, q_up_indices);
+            auto const wtks_dn = calc_wtks(QDSIZE, q_dn_indices);
+
+            auto wtks = (wtks_dn * wtks_up < 0.) ? (wtks_up - wtks_dn) / 2 : 0.;
+            ret.push_back(wtks);
+
             if (UNLIKELY(m_gt != nullptr))
             {
                 auto ref = (*m_gt)[(six - NSKIP) * NQRY + qix];
-                if (std::abs(ref - wkts) >= 0.001)
+                if (std::abs(ref - wtks) >= 0.001)
                 {
                     std::cout << "Sig: " << six + 1 << ", Query: " << qix + 1 \
-                        << " Ref: " << ref << " WKTS: " << wkts << " up/dn " << wkts_up << ' ' << wkts_dn << '\n';
+                        << " Ref: " << ref << " WTKS: " << wtks << " up/dn " << wtks_up << ' ' << wtks_dn << '\n';
                 }
             }
         }
