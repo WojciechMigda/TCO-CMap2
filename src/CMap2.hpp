@@ -129,7 +129,17 @@ CMAP2Updated::getWTKScomb(std::vector<std::string> & q_up, std::vector<std::stri
     std::vector<double> ret;
     ret.reserve(NQRY * NSIG);
 
-    std::vector<std::pair<std::uint16_t, std::uint16_t>> hranks[NBUCKET];
+    typedef union
+    {
+        struct
+        {
+            std::uint16_t score_ix;
+            std::uint16_t rank;
+        } rs;
+        std::uint32_t packed;
+    } rank_score_t;
+
+    std::vector<rank_score_t> hranks[NBUCKET];
     for (auto & bucket : hranks)
     {
         bucket.reserve(250 / (2 * NBUCKET));
@@ -163,14 +173,14 @@ CMAP2Updated::getWTKScomb(std::vector<std::string> & q_up, std::vector<std::stri
                 {
                     auto abs_score = std::abs(sig_p[ix]);
                     Sum_abs_scores += abs_score;
-                    hranks[ranks_p[ix] / RANK_PER_BUCKET].emplace_back(ranks_p[ix], ix);
+                    hranks[ranks_p[ix] / RANK_PER_BUCKET].emplace_back((rank_score_t){ix, ranks_p[ix]});
                 }
                 for (auto & bucket : hranks)
                 {
-                    //std::pair<std::uint16_t, std::uint16_t> * bucket_p = bucket.data();
-                    std::sort(bucket.begin(), bucket.end(),
-                        [](std::pair<std::uint16_t, std::uint16_t> const & p, std::pair<std::uint16_t, std::uint16_t> const & q)
-                        { return p.first < q.first;});
+                    std::uint32_t * bucket_p = (std::uint32_t *)bucket.data();
+                    std::sort(bucket_p, bucket_p + bucket.size(),
+                        [](std::uint32_t p, std::uint32_t q)
+                        { return p < q;});
                 }
 
                 double const penalty = -1. / (NGENES - QSIZE);
@@ -184,12 +194,12 @@ CMAP2Updated::getWTKScomb(std::vector<std::string> & q_up, std::vector<std::stri
                 {
                     for (auto const & rs : bucket)
                     {
-                        _acc += (rs.first - prev - 1) * penalty;
+                        _acc += (rs.rs.rank - prev - 1) * penalty;
                         _min = std::min(_min, _acc);
 
-                        prev = rs.first;
+                        prev = rs.rs.rank;
 
-                        _acc += std::abs(sig_p[rs.second]) / Sum_abs_scores;
+                        _acc += std::abs(sig_p[rs.rs.score_ix]) / Sum_abs_scores;
                         _max = std::max(_max, _acc);
                     }
                 }
