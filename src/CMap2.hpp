@@ -55,6 +55,8 @@ long int timestamp()
 struct CMAP2Updated
 {
     enum {NGENES = 10174};
+    enum {RANK_PER_BUCKET = 1024};
+    enum {NBUCKET = (NGENES + RANK_PER_BUCKET - 1) / RANK_PER_BUCKET};
 
     CMAP2Updated(size_type nsig = 476251, size_type nskip = 0, std::string path = "", std::vector<double> const * gt = nullptr) :
         NSIG(nsig), NSKIP(nskip), PATH(path), m_gt(gt)
@@ -126,8 +128,11 @@ CMAP2Updated::getWTKScomb(std::vector<std::string> & q_up, std::vector<std::stri
     std::vector<double> ret;
     ret.reserve(q_up.size() * NSIG);
 
-    std::vector<std::pair<std::uint16_t, std::uint16_t>> up_ranks;
-    std::vector<std::pair<std::uint16_t, std::uint16_t>> dn_ranks;
+    std::vector<std::pair<std::uint16_t, std::uint16_t>> hranks[NBUCKET];
+    for (auto & bucket : hranks)
+    {
+        bucket.reserve(250 / (4 * NBUCKET));
+    }
 
     for (auto six = NSKIP; six < NSIG; ++six)
     {
@@ -143,28 +148,34 @@ CMAP2Updated::getWTKScomb(std::vector<std::string> & q_up, std::vector<std::stri
             auto const QUSIZE = q_up_indices.size();
             auto const QDSIZE = q_dn_indices.size();
 
-            up_ranks.clear();
-            up_ranks.reserve(QUSIZE);
             double Sum_up_abs_scores = 0.;
-            std::transform(q_up_indices.cbegin(), q_up_indices.cend(), std::back_inserter(up_ranks),
-                [&ranks, &sig, &Sum_up_abs_scores](int ix)
-                {
-                    auto abs_score = std::abs(sig[ix]);
-                    Sum_up_abs_scores += abs_score;
-                    return std::make_pair<std::uint16_t, std::uint16_t>(ranks[ix], ix);
-                });
 
-            std::sort(up_ranks.begin(), up_ranks.end(),
-                [](std::pair<std::uint16_t, std::uint16_t> const & p, std::pair<std::uint16_t, std::uint16_t> const & q)
-                { return p.first < q.first;});
+            for (auto & bucket : hranks)
+            {
+                bucket.clear();
+            }
+            for (auto const ix : q_up_indices)
+            {
+                auto abs_score = std::abs(sig[ix]);
+                Sum_up_abs_scores += abs_score;
+                hranks[ranks[ix] / RANK_PER_BUCKET].emplace_back(ranks[ix], ix);
+            }
+            for (auto & bucket : hranks)
+            {
+                std::sort(bucket.begin(), bucket.end(),
+                    [](std::pair<std::uint16_t, std::uint16_t> const & p, std::pair<std::uint16_t, std::uint16_t> const & q)
+                    { return p.first < q.first;});
+            }
 
             double const upenalty = -1. / (NGENES - QUSIZE);
             double wkts_up = 0.;
+            double _acc = 0.;
+            double _extr = 0.;
+            int prev = 0; // rank indices are 1-based
+
+            for (auto const bucket : hranks)
             {
-                double _acc = 0.;
-                double _extr = 0.;
-                int prev = 0; // rank indices are 1-based
-                for (auto const & rs : up_ranks)
+                for (auto const & rs : bucket)
                 {
                     _acc += (rs.first - prev - 1) * upenalty;
                     auto abs_acc = std::abs(_acc);
@@ -185,28 +196,32 @@ CMAP2Updated::getWTKScomb(std::vector<std::string> & q_up, std::vector<std::stri
                 }
             }
 
-            dn_ranks.clear();
-            dn_ranks.reserve(QDSIZE);
             double Sum_dn_abs_scores = 0.;
-            std::transform(q_dn_indices.cbegin(), q_dn_indices.cend(), std::back_inserter(dn_ranks),
-                [&ranks, &sig, &Sum_dn_abs_scores](int ix)
-                {
-                    auto abs_score = std::abs(sig[ix]);
-                    Sum_dn_abs_scores += abs_score;
-                    return std::make_pair<std::uint16_t, std::uint16_t>(ranks[ix], ix);
-                });
-
-            std::sort(dn_ranks.begin(), dn_ranks.end(),
-                [](std::pair<std::uint16_t, std::uint16_t> const & p, std::pair<std::uint16_t, std::uint16_t> const & q)
-                { return p.first < q.first;});
+            for (auto & bucket : hranks)
+            {
+                bucket.clear();
+            }
+            for (auto const ix : q_dn_indices)
+            {
+                auto abs_score = std::abs(sig[ix]);
+                Sum_dn_abs_scores += abs_score;
+                hranks[ranks[ix] / RANK_PER_BUCKET].emplace_back(ranks[ix], ix);
+            }
+            for (auto & bucket : hranks)
+            {
+                std::sort(bucket.begin(), bucket.end(),
+                    [](std::pair<std::uint16_t, std::uint16_t> const & p, std::pair<std::uint16_t, std::uint16_t> const & q)
+                    { return p.first < q.first;});
+            }
 
             double const dpenalty = -1. / (NGENES - QDSIZE);
             double wkts_dn = 0.;
+            /*double*/ _acc = 0.;
+            /*double*/ _extr = 0.;
+            /*int*/ prev = 0; // rank indices are 1-based
+            for (auto const bucket : hranks)
             {
-                double _acc = 0.;
-                double _extr = 0.;
-                int prev = 0; // rank indices are 1-based
-                for (auto const & rs : dn_ranks)
+                for (auto const & rs : bucket)
                 {
                     _acc += (rs.first - prev - 1) * dpenalty;
                     auto abs_acc = std::abs(_acc);
