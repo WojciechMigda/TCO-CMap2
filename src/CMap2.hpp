@@ -38,6 +38,7 @@
 #include <unordered_map>
 #include <algorithm>
 #include <cstddef>
+#include <functional>
 
 #undef NSIG
 
@@ -64,7 +65,7 @@ struct CMAP2Updated
 
     int init(std::vector<int> const & genes);
     std::vector<double> getWTKScomb(std::vector<std::string> & q_up, std::vector<std::string> & q_dn);
-    std::vector<double> getWTKScomb_(std::vector<std::string> & q_up, std::vector<std::string> & q_dn);
+    std::vector<double> getWTKScomb_old(std::vector<std::string> & q_up, std::vector<std::string> & q_dn);
 
     size_type const NSIG;
     size_type const NSKIP;
@@ -94,9 +95,157 @@ CMAP2Updated::init(std::vector<int> const & genes)
     return 0;
 }
 
-
 std::vector<double>
 CMAP2Updated::getWTKScomb(std::vector<std::string> & q_up, std::vector<std::string> & q_dn)
+{
+    std::cerr << "Will process " << NSIG - NSKIP << " signatures, [" << NSKIP << ',' << NSIG << ")\n";
+
+    assert(q_up.size() == q_dn.size());
+    auto const NQRY = q_up.size();
+
+    std::vector<double> ret;
+    ret.reserve(NQRY * NSIG);
+
+    using gene_index_t = std::uint16_t;
+    using score_index_t = std::uint16_t;
+
+    using query_indexed_t = std::vector<gene_index_t>;
+
+    auto q_indexer = [this](std::vector<std::string> & qry) -> std::vector<query_indexed_t>
+        {
+            namespace q = ::cpplinq;
+            return q::from(qry)
+                >> q::select([this](std::string const & s)
+                    {
+                        auto q_parsed = parse_query(s);
+                        std::transform(q_parsed.begin(), q_parsed.end(), q_parsed.begin(),
+                            [this](int gene_id){ return this->m_gene_to_idx.at(gene_id); });
+                        return query_indexed_t(q_parsed.cbegin(), q_parsed.cend());
+                    })
+                >> q::to_vector();
+        };
+
+    // indices to unsorted scores
+    auto const q_up_indexed = q_indexer(q_up);
+    auto const q_dn_indexed = q_indexer(q_dn);
+
+    typedef struct
+    {
+        std::vector<std::pair<double, score_index_t>> scores;
+        double sum;
+    } query_state_t;
+
+    std::vector<query_state_t> q_up_states(NQRY);
+    std::vector<query_state_t> q_dn_states(NQRY);
+
+    std::vector<query_state_t *> gene_buckets[NGENES];
+
+    for (auto qix = 0u; qix < NQRY; ++qix)
+    {
+        for (auto const gene_ix : q_up_indexed[qix])
+        {
+            gene_buckets[gene_ix].push_back(&q_up_states[qix]);
+        }
+        for (auto const gene_ix : q_dn_indexed[qix])
+        {
+            gene_buckets[gene_ix].push_back(&q_dn_states[qix]);
+        }
+    }
+
+    for (auto six = 0u; six < NSIG; ++six)
+    {
+        auto sigs = m_cmap_lib.loadFromDoubleFile(PATH + "scoresBySig", six * NGENES, NGENES);
+
+//        namespace q = ::cpplinq;
+//        auto ranks = m_cmap_lib.loadFromIntFile(PATH + "ranksBySig", six * NGENES, NGENES);
+//        auto inv_ranks =
+//            q::from(ranks)
+//            >> q::zip_with(q::detail::int_range(0, INT_MAX))
+//            >> q::orderby_ascending([](std::pair<int, int> const & ri){ return ri.first; })
+//            >> q::select([](std::pair<int, int> const & ri){ return ri.second; })
+//            >> q::to_vector(NGENES)
+//            ;
+        auto _ranks = m_cmap_lib.loadFromIntFile(PATH + "ranksBySigInv", six * NGENES / 2, NGENES / 2);
+        auto inv_ranks = (std::uint16_t const *)_ranks.data();
+
+        for (auto qix = 0u; qix < NQRY; ++qix)
+        {
+            q_up_states[qix].scores.clear();
+            q_up_states[qix].sum = 0.;
+
+            q_dn_states[qix].scores.clear();
+            q_dn_states[qix].sum = 0.;
+        }
+
+        for (auto gix = 0; gix < NGENES; ++gix)
+        {
+            auto inv_rank = inv_ranks[gix];
+            auto score = std::abs(sigs[inv_rank]);
+
+            for (auto q_state_p : gene_buckets[inv_rank])
+            {
+                q_state_p->scores.emplace_back(score, gix);
+                q_state_p->sum += score;
+            }
+        }
+
+        for (auto qix = 0u; qix < NQRY; ++qix)
+        {
+            auto wtks_calc = [](query_state_t const & q_state)
+                {
+                    auto QSIZE = q_state.scores.size();
+                    double penalty = -1. / (NGENES - QSIZE);
+
+                    double wtks = 0.;
+                    double _acc = 0.;
+                    double _min = 0.;
+                    double _max = 0.;
+                    int prev = 0; // rank indices are 1-based
+
+                    for (auto const & sr : q_state.scores)
+                    {
+                        _acc += (sr.second - prev - 0) * penalty;
+                        _min = std::min(_min, _acc);
+
+                        prev = sr.second + 1;
+
+                        _acc += sr.first / q_state.sum;
+                        _max = std::max(_max, _acc);
+                    }
+                    if (_max > std::abs(_min))
+                    {
+                        wtks = _max;
+                    }
+                    else
+                    {
+                        wtks = _min;
+                    }
+                    return wtks;
+                };
+
+            double wtks_up = wtks_calc(q_up_states[qix]);
+            double wtks_dn = wtks_calc(q_dn_states[qix]);
+
+            auto wtks = (wtks_dn * wtks_up < 0.) ? (wtks_up - wtks_dn) / 2 : 0.;
+            ret.push_back(wtks);
+
+            if (UNLIKELY(m_gt != nullptr))
+            {
+                auto ref = (*m_gt)[(six - NSKIP) * NQRY + qix];
+                if (std::abs(ref - wtks) >= 0.001)
+                {
+                    std::cout << "Sig: " << six + 1 << ", Query: " << qix + 1 \
+                        << " Ref: " << ref << " WTKS: " << wtks << " up/dn " << wtks_up << ' ' << wtks_dn << '\n';
+                }
+            }
+        }
+    }
+
+    return ret;
+}
+
+std::vector<double>
+CMAP2Updated::getWTKScomb_old(std::vector<std::string> & q_up, std::vector<std::string> & q_dn)
 {
     std::cerr << "Will process " << NSIG - NSKIP << " signatures, [" << NSKIP << ',' << NSIG << ")\n";
 
