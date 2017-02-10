@@ -128,10 +128,15 @@ CMAP2Updated::getWTKScomb(std::vector<std::string> & q_up, std::vector<std::stri
     auto const q_up_indexed = q_indexer(q_up);
     auto const q_dn_indexed = q_indexer(q_dn);
 
-    typedef union
+//    typedef union
+//    {
+//        double f64;
+//        std::uint64_t i64;
+//    } packed_score_ix_t;
+    typedef struct
     {
-        double f64;
-        std::uint64_t i64;
+        float score;
+        std::uint16_t ix;
     } packed_score_ix_t;
 //    using packed_score_ix_t = std::uint64_t;
 
@@ -166,7 +171,8 @@ CMAP2Updated::getWTKScomb(std::vector<std::string> & q_up, std::vector<std::stri
 
     for (auto six = NSKIP; six < NSIG; ++six)
     {
-        auto sigs = m_cmap_lib.loadFromDoubleFile(PATH + "scoresBySigSortedAbs", six * NGENES, NGENES);
+        auto _sigs = m_cmap_lib.loadFromIntFile(PATH + "scoresBySigSortedAbsF32", six * NGENES, NGENES);
+        auto sigs = (float const *)_sigs.data();
 
         auto _ranks = m_cmap_lib.loadFromIntFile(PATH + "ranksBySigInv", six * NGENES / 2, NGENES / 2);
         auto inv_ranks = (std::uint16_t const *)_ranks.data();
@@ -187,14 +193,9 @@ CMAP2Updated::getWTKScomb(std::vector<std::string> & q_up, std::vector<std::stri
 
             for (auto q_state_p : gene_buckets[inv_rank])
             {
-                //q_state_p->scores.emplace_back(score, gix);
                 packed_score_ix_t sx;
-//                sx.score.f51 = (std::uint64_t)score >> 13;
-//                sx.ix.i14 =
-                sx.f64 = score;
-                sx.i64 >>= 13;
-                //sx &= ((-1ULL) >> 14);
-                sx.i64 |= ((std::uint64_t)gix << 50);
+                sx.score = score;
+                sx.ix = gix;
                 q_state_p->scores.push_back(sx);
                 q_state_p->sum += score;
             }
@@ -204,28 +205,31 @@ CMAP2Updated::getWTKScomb(std::vector<std::string> & q_up, std::vector<std::stri
         {
             auto wtks_calc = [](query_state_t const & q_state)
                 {
-                    auto QSIZE = q_state.scores.size();
-                    double penalty = -1. / (NGENES - QSIZE);
+                    auto const QSIZE = q_state.scores.size();
+                    float const penalty = -1. / (NGENES - QSIZE);
+                    double const inv_penalty = NGENES - QSIZE;
+                    double const divisor = 1. / q_state.sum;
+                    float const hit_fac = q_state.sum;
 
                     double wtks = 0.;
-                    double _acc = 0.;
-                    double _min = 0.;
-                    double _max = 0.;
+                    float _acc = 0.;
+                    float _min = 0.;
+                    float _max = 0.;
                     int prev = 0; // rank indices are 1-based
 
                     for (auto sr : q_state.scores)
                     {
-                        auto ix = sr.i64 >> 50;
-                        sr.i64 <<= 13;
-                        //sr.i64 &= 0x7FFFFFFFE0000000ULL; //((-1ULL) >> 1);
-                        sr.i64 &= ((-1ULL) >> 1);
-                        auto sc = sr.f64;
+                        auto ix = sr.ix;
+                        auto sc = sr.score;
                         _acc += (ix - prev - 0) * penalty;
+//                        _acc += (ix - prev - 0) / inv_penalty;
                         _min = std::min(_min, _acc);
 
                         prev = ix + 1;
 
-                        _acc += sc / q_state.sum;
+//                        _acc += sc / q_state.sum;
+                        _acc += sc / hit_fac;
+//                        _acc += sc * divisor;
                         _max = std::max(_max, _acc);
                     }
                     if (_max > std::abs(_min))

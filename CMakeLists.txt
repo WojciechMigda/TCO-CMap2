@@ -11,8 +11,8 @@ set( CMAKE_CXX_COMPILER_ARG1 -std=c++11 ) ### for Eclipse's discovery extra argu
 
 #add_definitions( -O0 -ggdb -std=c++11 -Wall -pedantic -march=native )
 #add_definitions( -O2 -ggdb -std=c++11 -Wall -pedantic -mmmx -msse -msse2 -msse3 -s -pipe -Wno-sign-compare -march=native )
-#add_definitions( -O2 -g -unroll-loops -std=c++11 -Wall -pedantic -mavx -s -pipe -Wno-sign-compare -march=native )
-add_definitions( -O3 -DNDEBUG -g0 -unroll-loops -std=c++11 -Wall -pedantic -s -pipe -Wno-sign-compare -msse4.2 -march=ivybridge )
+#add_definitions( -O2 -g -unroll-loops -std=c++11 -Wall -pedantic -msse4.2 -s -pipe -Wno-sign-compare -march=native )
+add_definitions( -O3 -DNDEBUG -g -unroll-loops -std=c++11 -Wall -pedantic -s -pipe -Wno-sign-compare -msse4.2 -march=westmere )
 
 #add_definitions( -O2 -ffast-math -fno-finite-math-only  -msse2 -march=native -std=c++11 -Wall -g -pedantic )
 #add_definitions( -O2 -ftree-vectorize -ffast-math -fno-finite-math-only  -msse2 -march=native -std=c++11 -Wall -g -pedantic )
