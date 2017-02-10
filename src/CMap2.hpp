@@ -39,6 +39,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <functional>
+#include <cstring>
 
 #undef NSIG
 
@@ -56,8 +57,6 @@ long int timestamp()
 struct CMAP2Updated
 {
     enum {NGENES = 10174};
-    enum {RANK_PER_BUCKET = 1024};
-    enum {NBUCKET = (NGENES + RANK_PER_BUCKET - 1) / RANK_PER_BUCKET};
 
     CMAP2Updated(size_type nsig = 476251, size_type nskip = 0, std::string path = "", std::vector<double> const * gt = nullptr) :
         NSIG(nsig), NSKIP(nskip), PATH(path), m_gt(gt)
@@ -94,9 +93,41 @@ CMAP2Updated::init(std::vector<int> const & genes)
     return 0;
 }
 
+template<typename Tp, size_type NCOLS, size_type NROWS, size_type ROW_MAX>
+struct IOProxy
+{
+    IOProxy(std::string fn) : m_fn(fn), m_row(INT_MAX), m_v(NCOLS * NROWS)
+    {}
+
+    Tp * read_row(size_type row)
+    {
+        if ((row < m_row) || (row >= (m_row + NROWS)))
+        {
+            auto start_row = row - row % NROWS;
+            auto end_row = std::min(ROW_MAX, start_row + NROWS);
+
+            m_v = m_cmap_lib.loadFromIntFile(
+                m_fn,
+                (start_row * NCOLS * sizeof (Tp)) / sizeof (int),
+                ((end_row - start_row) * NCOLS * sizeof (Tp)) / sizeof (int));
+            m_row = start_row;
+        }
+
+        return (Tp *)m_v.data() + (row - m_row) * NCOLS;
+    }
+
+    std::string m_fn;
+    size_type m_row;
+    std::vector<int> m_v;
+    CMAPLib m_cmap_lib;
+};
+
 std::vector<double>
 CMAP2Updated::getWTKScomb(std::vector<std::string> & q_up, std::vector<std::string> & q_dn)
 {
+    IOProxy<std::uint16_t, 10174, 10000, 476251> rank_cache(PATH + "ranksBySigInv");
+    IOProxy<float, 10174, 10000, 476251> score_cache(PATH + "scoresBySigSortedAbsF32");
+
     std::cout << "Will process " << NSIG - NSKIP << " signatures, [" << NSKIP << ',' << NSIG << ")\n";
 
     assert(q_up.size() == q_dn.size());
@@ -154,6 +185,11 @@ CMAP2Updated::getWTKScomb(std::vector<std::string> & q_up, std::vector<std::stri
 
     std::vector<query_state_t *> gene_buckets[NGENES];
 
+    for (auto & b : gene_buckets)
+    {
+//        b.reserve(6);
+    }
+
     for (auto qix = 0u; qix < NQRY; ++qix)
     {
         q_up_states[qix].scores.reserve(200);
@@ -171,11 +207,15 @@ CMAP2Updated::getWTKScomb(std::vector<std::string> & q_up, std::vector<std::stri
 
     for (auto six = NSKIP; six < NSIG; ++six)
     {
-        auto _sigs = m_cmap_lib.loadFromIntFile(PATH + "scoresBySigSortedAbsF32", six * NGENES, NGENES);
-        auto sigs = (float const *)_sigs.data();
 
-        auto _ranks = m_cmap_lib.loadFromIntFile(PATH + "ranksBySigInv", six * NGENES / 2, NGENES / 2);
-        auto inv_ranks = (std::uint16_t const *)_ranks.data();
+//        auto _ranks = m_cmap_lib.loadFromIntFile(PATH + "ranksBySigInv", six * NGENES / 2, NGENES / 2);
+//        auto inv_ranks = (std::uint16_t const *)_ranks.data();
+        auto inv_ranks = rank_cache.read_row(six);
+        //assert(memcmp(foo, inv_ranks, NGENES * 2) == 0);
+
+//        auto _sigs = m_cmap_lib.loadFromIntFile(PATH + "scoresBySigSortedAbsF32", six * NGENES, NGENES);
+//        auto sigs = (float const *)_sigs.data();
+        auto sigs = score_cache.read_row(six);
 
         for (auto qix = 0u; qix < NQRY; ++qix)
         {
@@ -211,13 +251,23 @@ CMAP2Updated::getWTKScomb(std::vector<std::string> & q_up, std::vector<std::stri
                     double const divisor = 1. / q_state.sum;
                     float const hit_fac = q_state.sum;
 
+                    // less cache misses but more insns..
+//                    float const hit_fac = ({
+//                        double sum = 0.;
+//                        for (auto const & sr : q_state.scores)
+//                        {
+//                            sum += sr.score;
+//                        }
+//                        sum;
+//                    });
+
                     double wtks = 0.;
                     float _acc = 0.;
                     float _min = 0.;
                     float _max = 0.;
                     int prev = 0; // rank indices are 1-based
 
-                    for (auto sr : q_state.scores)
+                    for (auto const & sr : q_state.scores)
                     {
                         auto ix = sr.ix;
                         auto sc = sr.score;
