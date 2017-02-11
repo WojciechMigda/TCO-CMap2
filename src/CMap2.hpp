@@ -172,23 +172,18 @@ CMAP2Updated::getWTKScomb(std::vector<std::string> & q_up, std::vector<std::stri
     auto const q_up_indexed = q_indexer(q_up);
     auto const q_dn_indexed = q_indexer(q_dn);
 
-    typedef struct
-    {
-        score_index_t ix;
-    } packed_score_ix_t;
+//    typedef struct
+//    {
+//        score_index_t ix;
+//    } packed_score_ix_t;
 
-    using score_ix_t = packed_score_ix_t;
-
-    typedef struct
-    {
-        std::vector<score_ix_t> scores;
-    } query_state_t;
+    using query_stream_t = std::vector<score_index_t>;
 
     // TODO zmerdzuj w jedno
-    std::vector<query_state_t> q_up_states(NQRY);
-    std::vector<query_state_t> q_dn_states(NQRY);
+    std::vector<query_stream_t> q_up_streams(NQRY);
+    std::vector<query_stream_t> q_dn_streams(NQRY);
 
-    std::vector<query_state_t *> gene_buckets[NGENES];
+    std::vector<query_stream_t *> gene_buckets[NGENES];
 
 //    for (auto & b : gene_buckets)
     {
@@ -197,16 +192,16 @@ CMAP2Updated::getWTKScomb(std::vector<std::string> & q_up, std::vector<std::stri
 
     for (auto qix = 0u; qix < NQRY; ++qix)
     {
-        q_up_states[qix].scores.reserve(200);
-        q_dn_states[qix].scores.reserve(200);
+        q_up_streams[qix].reserve(200);
+        q_dn_streams[qix].reserve(200);
 
         for (auto const gene_ix : q_up_indexed[qix])
         {
-            gene_buckets[gene_ix].push_back(&q_up_states[qix]);
+            gene_buckets[gene_ix].push_back(&q_up_streams[qix]);
         }
         for (auto const gene_ix : q_dn_indexed[qix])
         {
-            gene_buckets[gene_ix].push_back(&q_dn_states[qix]);
+            gene_buckets[gene_ix].push_back(&q_dn_streams[qix]);
         }
     }
 
@@ -219,27 +214,25 @@ CMAP2Updated::getWTKScomb(std::vector<std::string> & q_up, std::vector<std::stri
 
         for (auto qix = 0u; qix < NQRY; ++qix)
         {
-            q_up_states[qix].scores.clear();
-            q_dn_states[qix].scores.clear();
+            q_up_streams[qix].clear();
+            q_dn_streams[qix].clear();
         }
 
         for (auto gix = 0; gix < NGENES; ++gix)
         {
             auto inv_rank = inv_ranks[gix];
 
-            for (auto q_state_p : gene_buckets[inv_rank])
+            for (auto q_stream_p : gene_buckets[inv_rank])
             {
-                packed_score_ix_t sx;
-                sx.ix = gix;
-                q_state_p->scores.push_back(sx);
+                q_stream_p->push_back(gix);
             }
         }
 
         for (auto qix = 0u; qix < NQRY; ++qix)
         {
-            auto wtks_calc = [&sigs](query_state_t const & q_state, float const sum)
+            auto wtks_calc = [&sigs](query_stream_t const & q_stream, float const sum)
                 {
-                    auto const QSIZE = q_state.scores.size();
+                    auto const QSIZE = q_stream.size();
                     float const penalty = -1. / (NGENES - QSIZE);
                     float const divisor = 1. / sum;
 
@@ -249,10 +242,10 @@ CMAP2Updated::getWTKScomb(std::vector<std::string> & q_up, std::vector<std::stri
                     float _max = 0.;
                     int prev = 0; // rank indices are 1-based
 
-                    for (auto const & sr : q_state.scores)
+                    for (auto const & sr : q_stream)
                     {
-                        auto ix = sr.ix;
-                        auto sc = sigs[sr.ix];
+                        auto ix = sr;
+                        auto sc = sigs[sr];
                         _acc += (ix - prev) * penalty;
 //                        _acc += (ix - prev) / inv_penalty;
                         _min = std::min(_min, _acc);
@@ -278,24 +271,24 @@ CMAP2Updated::getWTKScomb(std::vector<std::string> & q_up, std::vector<std::stri
             float dn_sum = 0.;
             {
                 auto stix = 0u;
-                for (; stix < std::min(q_up_states[qix].scores.size(), q_dn_states[qix].scores.size()); ++stix)
+                for (; stix < std::min(q_up_streams[qix].size(), q_dn_streams[qix].size()); ++stix)
                 {
-                    up_sum += sigs[q_up_states[qix].scores[stix].ix];
-                    dn_sum += sigs[q_dn_states[qix].scores[stix].ix];
+                    up_sum += sigs[q_up_streams[qix][stix]];
+                    dn_sum += sigs[q_dn_streams[qix][stix]];
                 }
-                for (; stix < q_up_states[qix].scores.size(); ++stix)
+                for (; stix < q_up_streams[qix].size(); ++stix)
                 {
-                    up_sum += sigs[q_up_states[qix].scores[stix].ix];
+                    up_sum += sigs[q_up_streams[qix][stix]];
                 }
-                for (; stix < q_dn_states[qix].scores.size(); ++stix)
+                for (; stix < q_dn_streams[qix].size(); ++stix)
                 {
-                    dn_sum += sigs[q_dn_states[qix].scores[stix].ix];
+                    dn_sum += sigs[q_dn_streams[qix][stix]];
                 }
             }
 
 
-            double wtks_up = wtks_calc(q_up_states[qix], up_sum);
-            double wtks_dn = wtks_calc(q_dn_states[qix], dn_sum);
+            double wtks_up = wtks_calc(q_up_streams[qix], up_sum);
+            double wtks_dn = wtks_calc(q_dn_streams[qix], dn_sum);
 
             auto wtks = (wtks_dn * wtks_up < 0.) ? (wtks_up - wtks_dn) / 2 : 0.;
             ret.push_back(wtks);
