@@ -28,6 +28,8 @@
 #include "CMAPLib.hpp"
 #include "query_parser.hpp"
 
+#include "simd.hpp"
+
 #include "likely.h"
 
 #include <vector>
@@ -225,65 +227,10 @@ CMAP2Updated::getWTKScomb(std::vector<std::string> & q_up, std::vector<std::stri
 
         for (auto qix = 0u; qix < NQRY; ++qix)
         {
-            auto wtks_calc = [&sigs](query_stream_t const & q_stream, float const sum)
-                {
-                    auto const QSIZE = q_stream.size();
-                    float const penalty = -1. / (NGENES - QSIZE);
-                    float const divisor = 1. / sum;
-
-                    double wtks = 0.;
-                    float _acc = 0.;
-                    float _min = 0.;
-                    float _max = 0.;
-                    int prev = 0;
-
-                    for (auto const & sr : q_stream)
-                    {
-                        auto ix = sr;
-                        auto sc = sigs[sr];
-                        _acc += (ix - prev) * penalty;
-//                        _acc += (ix - prev) / inv_penalty;
-                        _min = std::min(_min, _acc);
-
-                        prev = ix + 1;
-
-//                        _acc += sc / sum;
-                        _acc += sc * divisor;
-                        _max = std::max(_max, _acc);
-                    }
-                    if (_max > std::abs(_min))
-                    {
-                        wtks = _max;
-                    }
-                    else
-                    {
-                        wtks = _min;
-                    }
-                    return wtks;
-                };
-
-            float up_sum = 0.;
-            float dn_sum = 0.;
-            {
-                auto stix = 0u;
-                for (; stix < std::min(q_up_streams[qix].size(), q_dn_streams[qix].size()); ++stix)
-                {
-                    up_sum += sigs[q_up_streams[qix][stix]];
-                    dn_sum += sigs[q_dn_streams[qix][stix]];
-                }
-                for (; stix < q_up_streams[qix].size(); ++stix)
-                {
-                    up_sum += sigs[q_up_streams[qix][stix]];
-                }
-                for (; stix < q_dn_streams[qix].size(); ++stix)
-                {
-                    dn_sum += sigs[q_dn_streams[qix][stix]];
-                }
-            }
-
-
-            double wtks_up = wtks_calc(q_up_streams[qix], up_sum);
-            double wtks_dn = wtks_calc(q_dn_streams[qix], dn_sum);
+            double wtks_up_dn[2];
+            calc_wtks_2(q_up_streams[qix], q_dn_streams[qix], sigs, NGENES, wtks_up_dn);
+            auto wtks_up = wtks_up_dn[0];
+            auto wtks_dn = wtks_up_dn[1];
 
             auto wtks = (wtks_dn * wtks_up < 0.) ? (wtks_up - wtks_dn) / 2 : 0.;
             ret.push_back(wtks);
