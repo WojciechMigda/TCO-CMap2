@@ -1,5 +1,6 @@
 #define NDEBUG
 #define NO_CMAPLIB_DEF
+#define CREATE_INDEX_FILES
 
 //#pragma GCC optimize ( "-O2" )
 #pragma GCC target ("sse4.2")

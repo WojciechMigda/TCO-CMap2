@@ -24,10 +24,11 @@
 #ifndef SRC_CMAP2_HPP_
 #define SRC_CMAP2_HPP_
 
+#include "chunked.hpp"
 #include "CMAPLib.hpp"
 #include "query_parser.hpp"
 
-#include "cpplinq.hpp"
+//#include "cpplinq.hpp"
 #include "likely.h"
 
 #include <vector>
@@ -40,8 +41,12 @@
 #include <cstddef>
 #include <functional>
 #include <cstring>
+#include <climits>
 
 #undef NSIG
+
+enum { PARAM_ROWS_PER_CHUNK_INT = 40000 };
+enum { PARAM_ROWS_PER_CHUNK_DBL = 20000 };
 
 using size_type = std::size_t;
 
@@ -60,7 +65,9 @@ struct CMAP2Updated
 
     CMAP2Updated(size_type nsig = 476251, size_type nskip = 0, std::string path = "", std::vector<double> const * gt = nullptr) :
         NSIG(nsig), NSKIP(nskip), PATH(path), m_gt(gt)
-    {}
+    {
+        m_gene_to_idx.reserve(NGENES);
+    }
 
     int init(std::vector<int> const & genes);
     std::vector<double> getWTKScomb(std::vector<std::string> & q_up, std::vector<std::string> & q_dn);
@@ -77,23 +84,37 @@ int
 CMAP2Updated::init(std::vector<int> const & genes)
 {
     m_gene_to_idx.clear();
-    namespace q = ::cpplinq;
-    q::from(genes)
-        >> q::zip_with(q::detail::int_range(0, INT_MAX))
-        >> q::aggregate(&m_gene_to_idx,
-            [](std::unordered_map<int, int> * seed, std::pair<int, int> const & kv)
-            {
-                seed->emplace(kv.first, kv.second);
-                return seed;
-            })
-        ;
+//    namespace q = ::cpplinq;
+//    q::from(genes)
+//        >> q::zip_with(q::detail::int_range(0, INT_MAX))
+//        >> q::aggregate(&m_gene_to_idx,
+//            [](std::unordered_map<int, int> * seed, std::pair<int, int> const & kv)
+//            {
+//                seed->emplace(kv.first, kv.second);
+//                return seed;
+//            })
+//        ;
+    for (int gix = 0u; gix < genes.size(); ++gix)
+    {
+        m_gene_to_idx.emplace(genes[gix], gix);
+    }
 
-    // cache warm up ??? TODO
+#ifdef CREATE_INDEX_FILES
+    auto time0 = timestamp();
+
+    std::cout << "[init] Creating ranksBySigInv chunks" << std::endl;
+    create_index_files(PATH + "ranksBySig", "ranksBySigInv", NSIG, NGENES, PARAM_ROWS_PER_CHUNK_INT);
+    std::cout << "[init] Elapsed " << timestamp() - time0 << " secs" << std::endl; // 413 sec
+
+    std::cout << "[init] Creating scoresBySigSortedAbsF32 chunks" << std::endl;
+    create_score_files(PATH + "scoresBySig", "scoresBySigSortedAbsF32", NSIG, NGENES, PARAM_ROWS_PER_CHUNK_DBL);
+    std::cout << "[init] Elapsed " << timestamp() - time0 << " secs" << std::endl; // 1281 sec
+#endif
 
     return 0;
 }
 
-template<typename Tp, size_type NCOLS, size_type NROWS, size_type ROW_MAX>
+template<typename Tp, size_type NCOLS, size_type NROWS, size_type ROW_MAX, size_type ROWS_PER_CHUNK>
 struct IOProxy
 {
     IOProxy(std::string fn) : m_fn(fn), m_row(INT_MAX), m_v(NCOLS * NROWS)
@@ -104,12 +125,13 @@ struct IOProxy
         if ((row < m_row) || (row >= (m_row + NROWS)))
         {
             auto start_row = row - row % NROWS;
-            auto end_row = std::min(ROW_MAX, start_row + NROWS);
+            auto actual_rows = std::min(ROW_MAX, start_row + NROWS) - start_row;
+            auto chunk_num = start_row / ROWS_PER_CHUNK;
 
             m_v = m_cmap_lib.loadFromIntFile(
-                m_fn,
-                (start_row * NCOLS * sizeof (Tp)) / sizeof (int),
-                ((end_row - start_row) * NCOLS * sizeof (Tp)) / sizeof (int));
+                chunk_fname(m_fn, chunk_num),
+                ((start_row - chunk_num * ROWS_PER_CHUNK) * NCOLS * sizeof (Tp)) / sizeof (int),
+                (actual_rows * NCOLS * sizeof (Tp)) / sizeof (int));
             m_row = start_row;
         }
 
@@ -125,8 +147,10 @@ struct IOProxy
 std::vector<double>
 CMAP2Updated::getWTKScomb(std::vector<std::string> & q_up, std::vector<std::string> & q_dn)
 {
-    IOProxy<std::uint16_t, 10174, 10000, 476251> rank_cache(PATH + "ranksBySigInv");
-    IOProxy<float, 10174, 10000, 476251> score_cache(PATH + "scoresBySigSortedAbsF32");
+//    IOProxy<std::uint16_t, 10174, 10000, 476251, 100000> rank_cache(PATH + "ranksBySigInv");
+//    IOProxy<float, 10174, 10000, 476251, 100000> score_cache(PATH + "scoresBySigSortedAbsF32");
+    IOProxy<std::uint16_t, NGENES, 10000, 476251, PARAM_ROWS_PER_CHUNK_INT> rank_cache("ranksBySigInv");
+    IOProxy<float, NGENES, 10000, 476251, PARAM_ROWS_PER_CHUNK_DBL> score_cache("scoresBySigSortedAbsF32");
 
     std::cout << "Will process " << NSIG - NSKIP << " signatures, [" << NSKIP << ',' << NSIG << ")\n";
 
@@ -143,16 +167,27 @@ CMAP2Updated::getWTKScomb(std::vector<std::string> & q_up, std::vector<std::stri
 
     auto q_indexer = [this](std::vector<std::string> & qry) -> std::vector<query_indexed_t>
         {
-            namespace q = ::cpplinq;
-            return q::from(qry)
-                >> q::select([this](std::string const & s)
-                    {
-                        auto q_parsed = parse_query(s);
-                        std::transform(q_parsed.begin(), q_parsed.end(), q_parsed.begin(),
-                            [this](int gene_id){ return this->m_gene_to_idx.at(gene_id); });
-                        return query_indexed_t(q_parsed.cbegin(), q_parsed.cend());
-                    })
-                >> q::to_vector();
+            std::vector<query_indexed_t> ret;
+            ret.reserve(qry.size());
+
+            for (auto const & s : qry)
+            {
+                auto q_parsed = parse_query(s);
+                std::transform(q_parsed.begin(), q_parsed.end(), q_parsed.begin(),
+                    [this](int gene_id){ return this->m_gene_to_idx.at(gene_id); });
+                ret.emplace_back(q_parsed.cbegin(), q_parsed.cend());
+            }
+//            namespace q = ::cpplinq;
+//            return q::from(qry)
+//                >> q::select([this](std::string const & s)
+//                    {
+//                        auto q_parsed = parse_query(s);
+//                        std::transform(q_parsed.begin(), q_parsed.end(), q_parsed.begin(),
+//                            [this](int gene_id){ return this->m_gene_to_idx.at(gene_id); });
+//                        return query_indexed_t(q_parsed.cbegin(), q_parsed.cend());
+//                    })
+//                >> q::to_vector();
+            return ret;
         };
 
     // indices to unsorted scores
