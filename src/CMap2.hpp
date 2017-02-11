@@ -172,11 +172,6 @@ CMAP2Updated::getWTKScomb(std::vector<std::string> & q_up, std::vector<std::stri
     auto const q_up_indexed = q_indexer(q_up);
     auto const q_dn_indexed = q_indexer(q_dn);
 
-//    typedef struct
-//    {
-//        score_index_t ix;
-//    } packed_score_ix_t;
-
     using query_stream_t = std::vector<score_index_t>;
 
     // TODO zmerdzuj w jedno
@@ -240,7 +235,7 @@ CMAP2Updated::getWTKScomb(std::vector<std::string> & q_up, std::vector<std::stri
                     float _acc = 0.;
                     float _min = 0.;
                     float _max = 0.;
-                    int prev = 0; // rank indices are 1-based
+                    int prev = 0;
 
                     for (auto const & sr : q_stream)
                     {
