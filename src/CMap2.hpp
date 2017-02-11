@@ -134,6 +134,7 @@ struct IOProxy
     CMAPLib m_cmap_lib;
 };
 
+
 std::vector<double>
 CMAP2Updated::getWTKScomb(std::vector<std::string> & q_up, std::vector<std::string> & q_dn)
 {
@@ -236,23 +237,11 @@ CMAP2Updated::getWTKScomb(std::vector<std::string> & q_up, std::vector<std::stri
 
         for (auto qix = 0u; qix < NQRY; ++qix)
         {
-            auto wtks_calc = [&sigs](query_state_t const & q_state)
+            auto wtks_calc = [&sigs](query_state_t const & q_state, float const sum)
                 {
                     auto const QSIZE = q_state.scores.size();
                     float const penalty = -1. / (NGENES - QSIZE);
-//                    float const hit_fac = q_state.sum;
-
-                    // less cache misses but more insns..
-                    float const hit_fac = ({
-                        //double sum = 0.;
-                        float sum = 0.;
-                        for (auto const & sr : q_state.scores)
-                        {
-                            sum += sigs[sr.ix];
-                        }
-                        sum;
-                    });
-                    float const divisor = 1. / hit_fac;
+                    float const divisor = 1. / sum;
 
                     double wtks = 0.;
                     float _acc = 0.;
@@ -270,8 +259,8 @@ CMAP2Updated::getWTKScomb(std::vector<std::string> & q_up, std::vector<std::stri
 
                         prev = ix + 1;
 
-                        _acc += sc / hit_fac;
-//                        _acc += sc * divisor;
+//                        _acc += sc / sum;
+                        _acc += sc * divisor;
                         _max = std::max(_max, _acc);
                     }
                     if (_max > std::abs(_min))
@@ -285,8 +274,28 @@ CMAP2Updated::getWTKScomb(std::vector<std::string> & q_up, std::vector<std::stri
                     return wtks;
                 };
 
-            double wtks_up = wtks_calc(q_up_states[qix]);
-            double wtks_dn = wtks_calc(q_dn_states[qix]);
+            float up_sum = 0.;
+            float dn_sum = 0.;
+            {
+                auto stix = 0u;
+                for (; stix < std::min(q_up_states[qix].scores.size(), q_dn_states[qix].scores.size()); ++stix)
+                {
+                    up_sum += sigs[q_up_states[qix].scores[stix].ix];
+                    dn_sum += sigs[q_dn_states[qix].scores[stix].ix];
+                }
+                for (; stix < q_up_states[qix].scores.size(); ++stix)
+                {
+                    up_sum += sigs[q_up_states[qix].scores[stix].ix];
+                }
+                for (; stix < q_dn_states[qix].scores.size(); ++stix)
+                {
+                    dn_sum += sigs[q_dn_states[qix].scores[stix].ix];
+                }
+            }
+
+
+            double wtks_up = wtks_calc(q_up_states[qix], up_sum);
+            double wtks_dn = wtks_calc(q_dn_states[qix], dn_sum);
 
             auto wtks = (wtks_dn * wtks_up < 0.) ? (wtks_up - wtks_dn) / 2 : 0.;
             ret.push_back(wtks);
