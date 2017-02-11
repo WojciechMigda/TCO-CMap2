@@ -28,7 +28,6 @@
 #include "CMAPLib.hpp"
 #include "query_parser.hpp"
 
-//#include "cpplinq.hpp"
 #include "likely.h"
 
 #include <vector>
@@ -84,16 +83,7 @@ int
 CMAP2Updated::init(std::vector<int> const & genes)
 {
     m_gene_to_idx.clear();
-//    namespace q = ::cpplinq;
-//    q::from(genes)
-//        >> q::zip_with(q::detail::int_range(0, INT_MAX))
-//        >> q::aggregate(&m_gene_to_idx,
-//            [](std::unordered_map<int, int> * seed, std::pair<int, int> const & kv)
-//            {
-//                seed->emplace(kv.first, kv.second);
-//                return seed;
-//            })
-//        ;
+
     for (int gix = 0u; gix < genes.size(); ++gix)
     {
         m_gene_to_idx.emplace(genes[gix], gix);
@@ -147,8 +137,6 @@ struct IOProxy
 std::vector<double>
 CMAP2Updated::getWTKScomb(std::vector<std::string> & q_up, std::vector<std::string> & q_dn)
 {
-//    IOProxy<std::uint16_t, 10174, 10000, 476251, 100000> rank_cache(PATH + "ranksBySigInv");
-//    IOProxy<float, 10174, 10000, 476251, 100000> score_cache(PATH + "scoresBySigSortedAbsF32");
     IOProxy<std::uint16_t, NGENES, 10000, 476251, PARAM_ROWS_PER_CHUNK_INT> rank_cache("ranksBySigInv");
     IOProxy<float, NGENES, 10000, 476251, PARAM_ROWS_PER_CHUNK_DBL> score_cache("scoresBySigSortedAbsF32");
 
@@ -177,50 +165,31 @@ CMAP2Updated::getWTKScomb(std::vector<std::string> & q_up, std::vector<std::stri
                     [this](int gene_id){ return this->m_gene_to_idx.at(gene_id); });
                 ret.emplace_back(q_parsed.cbegin(), q_parsed.cend());
             }
-//            namespace q = ::cpplinq;
-//            return q::from(qry)
-//                >> q::select([this](std::string const & s)
-//                    {
-//                        auto q_parsed = parse_query(s);
-//                        std::transform(q_parsed.begin(), q_parsed.end(), q_parsed.begin(),
-//                            [this](int gene_id){ return this->m_gene_to_idx.at(gene_id); });
-//                        return query_indexed_t(q_parsed.cbegin(), q_parsed.cend());
-//                    })
-//                >> q::to_vector();
             return ret;
         };
 
-    // indices to unsorted scores
     auto const q_up_indexed = q_indexer(q_up);
     auto const q_dn_indexed = q_indexer(q_dn);
 
-//    typedef union
-//    {
-//        double f64;
-//        std::uint64_t i64;
-//    } packed_score_ix_t;
     typedef struct
     {
-        float score;
-        std::uint16_t ix;
+        score_index_t ix;
     } packed_score_ix_t;
-//    using packed_score_ix_t = std::uint64_t;
 
-    //using score_ix_t = std::pair<double, score_index_t>;
     using score_ix_t = packed_score_ix_t;
 
     typedef struct
     {
         std::vector<score_ix_t> scores;
-        double sum;
     } query_state_t;
 
+    // TODO zmerdzuj w jedno
     std::vector<query_state_t> q_up_states(NQRY);
     std::vector<query_state_t> q_dn_states(NQRY);
 
     std::vector<query_state_t *> gene_buckets[NGENES];
 
-    for (auto & b : gene_buckets)
+//    for (auto & b : gene_buckets)
     {
 //        b.reserve(6);
     }
@@ -243,58 +212,47 @@ CMAP2Updated::getWTKScomb(std::vector<std::string> & q_up, std::vector<std::stri
     for (auto six = NSKIP; six < NSIG; ++six)
     {
 
-//        auto _ranks = m_cmap_lib.loadFromIntFile(PATH + "ranksBySigInv", six * NGENES / 2, NGENES / 2);
-//        auto inv_ranks = (std::uint16_t const *)_ranks.data();
         auto inv_ranks = rank_cache.read_row(six);
-        //assert(memcmp(foo, inv_ranks, NGENES * 2) == 0);
 
-//        auto _sigs = m_cmap_lib.loadFromIntFile(PATH + "scoresBySigSortedAbsF32", six * NGENES, NGENES);
-//        auto sigs = (float const *)_sigs.data();
         auto sigs = score_cache.read_row(six);
 
         for (auto qix = 0u; qix < NQRY; ++qix)
         {
             q_up_states[qix].scores.clear();
-            q_up_states[qix].sum = 0.;
-
             q_dn_states[qix].scores.clear();
-            q_dn_states[qix].sum = 0.;
         }
 
         for (auto gix = 0; gix < NGENES; ++gix)
         {
             auto inv_rank = inv_ranks[gix];
-            auto score = sigs[gix];
 
             for (auto q_state_p : gene_buckets[inv_rank])
             {
                 packed_score_ix_t sx;
-                sx.score = score;
                 sx.ix = gix;
                 q_state_p->scores.push_back(sx);
-                q_state_p->sum += score;
             }
         }
 
         for (auto qix = 0u; qix < NQRY; ++qix)
         {
-            auto wtks_calc = [](query_state_t const & q_state)
+            auto wtks_calc = [&sigs](query_state_t const & q_state)
                 {
                     auto const QSIZE = q_state.scores.size();
                     float const penalty = -1. / (NGENES - QSIZE);
-                    double const inv_penalty = NGENES - QSIZE;
-                    double const divisor = 1. / q_state.sum;
-                    float const hit_fac = q_state.sum;
+//                    float const hit_fac = q_state.sum;
 
                     // less cache misses but more insns..
-//                    float const hit_fac = ({
-//                        double sum = 0.;
-//                        for (auto const & sr : q_state.scores)
-//                        {
-//                            sum += sr.score;
-//                        }
-//                        sum;
-//                    });
+                    float const hit_fac = ({
+                        //double sum = 0.;
+                        float sum = 0.;
+                        for (auto const & sr : q_state.scores)
+                        {
+                            sum += sigs[sr.ix];
+                        }
+                        sum;
+                    });
+                    float const divisor = 1. / hit_fac;
 
                     double wtks = 0.;
                     float _acc = 0.;
@@ -305,14 +263,13 @@ CMAP2Updated::getWTKScomb(std::vector<std::string> & q_up, std::vector<std::stri
                     for (auto const & sr : q_state.scores)
                     {
                         auto ix = sr.ix;
-                        auto sc = sr.score;
-                        _acc += (ix - prev - 0) * penalty;
-//                        _acc += (ix - prev - 0) / inv_penalty;
+                        auto sc = sigs[sr.ix];
+                        _acc += (ix - prev) * penalty;
+//                        _acc += (ix - prev) / inv_penalty;
                         _min = std::min(_min, _acc);
 
                         prev = ix + 1;
 
-//                        _acc += sc / q_state.sum;
                         _acc += sc / hit_fac;
 //                        _acc += sc * divisor;
                         _max = std::max(_max, _acc);
