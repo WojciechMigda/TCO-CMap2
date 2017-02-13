@@ -174,33 +174,53 @@ CMAP2Updated::getWTKScomb(std::vector<std::string> & q_up, std::vector<std::stri
     auto const q_up_indexed = q_indexer(q_up);
     auto const q_dn_indexed = q_indexer(q_dn);
 
+//    typedef struct
+//    {
+//        std::vector<score_index_t> ixs;
+////        __v4sf min_max;
+//    } query_stream_t;
+
+    using stream_index_t = unsigned int;
+
     using query_stream_t = std::vector<score_index_t>;
 
-    // TODO zmerdzuj w jedno
-    std::vector<query_stream_t> q_up_streams(NQRY);
-    std::vector<query_stream_t> q_dn_streams(NQRY);
+//    std::vector<query_stream_t> q_up_streams(NQRY);
+//    std::vector<query_stream_t> q_dn_streams(NQRY);
+    // both up and down queries
+    std::vector<query_stream_t> q_streams(2 * NQRY);
+    std::vector<float> mins(2 * NQRY);
+    std::vector<float> maxs(2 * NQRY);
 
     std::vector<query_stream_t *> gene_buckets[NGENES];
+    //std::vector<stream_index_t> gene_buckets[NGENES];
 
-//    for (auto & b : gene_buckets)
+    for (stream_index_t qix = 0u; qix < NQRY; ++qix)
     {
-//        b.reserve(6);
-    }
-
-    for (auto qix = 0u; qix < NQRY; ++qix)
-    {
-        q_up_streams[qix].reserve(200);
-        q_dn_streams[qix].reserve(200);
+        q_streams[2 * qix + 0]./*ixs.*/reserve(200);
+        q_streams[2 * qix + 1]./*ixs.*/reserve(200);
 
         for (auto const gene_ix : q_up_indexed[qix])
         {
-            gene_buckets[gene_ix].push_back(&q_up_streams[qix]);
+            //gene_buckets[gene_ix].push_back(2 * qix + 0);
+            gene_buckets[gene_ix].push_back(&q_streams[2 * qix + 0]);
         }
         for (auto const gene_ix : q_dn_indexed[qix])
         {
-            gene_buckets[gene_ix].push_back(&q_dn_streams[qix]);
+            //gene_buckets[gene_ix].push_back(2 * qix + 1);
+            gene_buckets[gene_ix].push_back(&q_streams[2 * qix + 1]);
         }
     }
+
+//    std::vector<stream_index_t> proc_order(q_streams.size());
+//    std::iota(proc_order.begin(), proc_order.end(), 0);
+
+    // sort query streams by ascending score indices vector size
+    // TODO
+//    std::sort(proc_order.begin(), proc_order.end(),
+//        [&q_streams](stream_index_t p, stream_index_t q)
+//        {
+//            return q_streams[p].ixs.size() < q_streams[q].ixs.size();
+//        });
 
     for (auto six = NSKIP; six < NSIG; ++six)
     {
@@ -209,41 +229,174 @@ CMAP2Updated::getWTKScomb(std::vector<std::string> & q_up, std::vector<std::stri
 
         auto sigs = score_cache.read_row(six);
 
-        for (auto qix = 0u; qix < NQRY; ++qix)
+        for (auto qix = 0u; qix < 2 * NQRY; ++qix)
         {
-            q_up_streams[qix].clear();
-            q_dn_streams[qix].clear();
+            q_streams[qix]./*ixs.*/clear();
         }
 
         for (auto gix = 0; gix < NGENES; ++gix)
         {
             auto inv_rank = inv_ranks[gix];
 
-            for (auto q_stream_p : gene_buckets[inv_rank])
+            for (auto q_stream_ix : gene_buckets[inv_rank])
             {
-                q_stream_p->push_back(gix);
+                //q_streams[q_stream_ix].ixs.push_back(gix);
+                q_stream_ix->/*ixs.*/push_back(gix);
             }
+        }
+
+        auto const N4 = NQRY / 2;
+        for (auto b4_ix = 0u; b4_ix < N4; ++b4_ix)
+        {
+            calc_min_max_4(
+                q_streams[4 * b4_ix + 0], q_streams[4 * b4_ix + 1],
+                q_streams[4 * b4_ix + 2], q_streams[4 * b4_ix + 3],
+                sigs,
+                NGENES,
+                mins[4 * b4_ix + 0], mins[4 * b4_ix + 1],
+                mins[4 * b4_ix + 2], mins[4 * b4_ix + 3],
+                maxs[4 * b4_ix + 0], maxs[4 * b4_ix + 1],
+                maxs[4 * b4_ix + 2], maxs[4 * b4_ix + 3]);
+
+//            calc_min_max_2(
+//                q_streams[4 * b4_ix + 0], q_streams[4 * b4_ix + 1],
+//                sigs,
+//                NGENES,
+//                mins[4 * b4_ix + 0], mins[4 * b4_ix + 1],
+//                maxs[4 * b4_ix + 0], maxs[4 * b4_ix + 1]);
+//
+//            calc_min_max_2(
+//                q_streams[4 * b4_ix + 2], q_streams[4 * b4_ix + 3],
+//                sigs,
+//                NGENES,
+//                mins[4 * b4_ix + 2], mins[4 * b4_ix + 3],
+//                maxs[4 * b4_ix + 2], maxs[4 * b4_ix + 3]);
+        }
+        if (UNLIKELY(NQRY % 2))
+        {
+            calc_min_max_2(
+                q_streams[4 * N4 + 0], q_streams[4 * N4 + 1],
+                sigs,
+                NGENES,
+                mins[4 * N4 + 0], mins[4 * N4 + 1],
+                maxs[4 * N4 + 0], maxs[4 * N4 + 1]);
+        }
+
+        for (auto b4_ix = 0u; b4_ix < N4; ++b4_ix)
+        {
+            __v4sf _min = _mm_load_ps(&mins[4 * b4_ix]);
+            __v4sf _max = _mm_load_ps(&maxs[4 * b4_ix]);
+            auto vmask = _mm_cmpgt_ps(_max, _mm_and_ps(abs_mask(), _min));
+            auto wtks = _mm_or_ps(_mm_and_ps(vmask, _max), _mm_andnot_ps(vmask, _min));
+
+            double _wtks = 0.;
+            if (std::signbit(wtks[0]) != std::signbit(wtks[1]))
+            {
+                _wtks = (wtks[0] - wtks[1]) / 2;
+            }
+            ret.push_back(_wtks);
+                        if (UNLIKELY(m_gt != nullptr))
+                        {
+                            auto ref = (*m_gt)[(six - NSKIP) * NQRY + b4_ix * 2 + 0];
+                            if (std::abs(ref - _wtks) >= 0.001)
+                            {
+                                std::cout << "Sig: " << six + 1 << ", Query: " << b4_ix * 2 + 0 + 1 \
+                                    << " Ref: " << ref << " WTKS: " << _wtks << " up/dn " << wtks[0] << ' ' << wtks[1] << '\n';
+                            }
+                        }
+
+
+            _wtks = 0.;
+            if (std::signbit(wtks[2]) != std::signbit(wtks[3]))
+            {
+                _wtks = (wtks[2] - wtks[3]) / 2;
+            }
+            ret.push_back(_wtks);
+                        if (UNLIKELY(m_gt != nullptr))
+                        {
+                            auto ref = (*m_gt)[(six - NSKIP) * NQRY + b4_ix * 2 + 1];
+                            if (std::abs(ref - _wtks) >= 0.001)
+                            {
+                                std::cout << "Sig: " << six + 1 << ", Query: " << b4_ix * 2 + 0 + 1 \
+                                    << " Ref: " << ref << " WTKS: " << _wtks << " up/dn " << wtks[2] << ' ' << wtks[3] << '\n';
+                            }
+                        }
+        }
+        // TODO dla nieparzystego
+        if (UNLIKELY(NQRY % 2))
+        {
+            auto _min = (__v4sf)_mm_cvtsi64_si128(pack_2f(mins[4 * N4 + 0], mins[4 * N4 + 1]));
+            auto _max = (__v4sf)_mm_cvtsi64_si128(pack_2f(maxs[4 * N4 + 0], maxs[4 * N4 + 1]));
+
+            auto vmask = _mm_cmpgt_ps(_max, _mm_and_ps(abs_mask(), _min));
+            auto wtks = _mm_or_ps(_mm_and_ps(vmask, _max), _mm_andnot_ps(vmask, _min));
+
+            double _wtks = 0.;
+            if (std::signbit(wtks[0]) != std::signbit(wtks[1]))
+            {
+                _wtks = (wtks[0] - wtks[1]) / 2;
+            }
+            ret.push_back(_wtks);
+                        if (UNLIKELY(m_gt != nullptr))
+                        {
+                            auto ref = (*m_gt)[(six - NSKIP) * NQRY + N4 * 2 + 0];
+                            if (std::abs(ref - _wtks) >= 0.001)
+                            {
+                                std::cout << "Sig: " << six + 1 << ", Query: " << N4 * 2 + 0 + 1 \
+                                    << " Ref: " << ref << " WTKS: " << _wtks << " up/dn " << wtks[0] << ' ' << wtks[1] << '\n';
+                            }
+                        }
+
+        }
+
+
+        for (auto qix = 0u; qix < NQRY; ++qix)
+        {
+
+//            double wtks_up;
+//            double wtks_dn;
+//
+//            if (maxs[2 * qix + 0] > std::abs(mins[2 * qix + 0]))
+//            {
+//                wtks_up = maxs[2 * qix + 0];
+//            }
+//            else
+//            {
+//                wtks_up = mins[2 * qix + 0];
+//            }
+//            if (maxs[2 * qix + 1] > std::abs(mins[2 * qix + 1]))
+//            {
+//                wtks_dn = maxs[2 * qix + 1];
+//            }
+//            else
+//            {
+//                wtks_dn = mins[2 * qix + 1];
+//            }
+//            auto wtks = (wtks_dn * wtks_up < 0.) ? (wtks_up - wtks_dn) / 2 : 0.;
+//            ret.push_back(wtks);
         }
 
         for (auto qix = 0u; qix < NQRY; ++qix)
         {
-            double wtks_up_dn[2];
-            calc_wtks_2(q_up_streams[qix], q_dn_streams[qix], sigs, NGENES, wtks_up_dn);
-            auto wtks_up = wtks_up_dn[0];
-            auto wtks_dn = wtks_up_dn[1];
 
-            auto wtks = (wtks_dn * wtks_up < 0.) ? (wtks_up - wtks_dn) / 2 : 0.;
-            ret.push_back(wtks);
-
-            if (UNLIKELY(m_gt != nullptr))
-            {
-                auto ref = (*m_gt)[(six - NSKIP) * NQRY + qix];
-                if (std::abs(ref - wtks) >= 0.001)
-                {
-                    std::cout << "Sig: " << six + 1 << ", Query: " << qix + 1 \
-                        << " Ref: " << ref << " WTKS: " << wtks << " up/dn " << wtks_up << ' ' << wtks_dn << '\n';
-                }
-            }
+//            double wtks_up_dn[2];
+//            //calc_wtks_2(q_streams[proc_order[2 * qix]].ixs, q_streams[proc_order[2 * qix + 1]].ixs, sigs, NGENES, wtks_up_dn);
+//            calc_wtks_2(q_streams[2 * qix]/*.ixs*/, q_streams[2 * qix + 1]/*.ixs*/, sigs, NGENES, wtks_up_dn);
+//            auto wtks_up = wtks_up_dn[0];
+//            auto wtks_dn = wtks_up_dn[1];
+//
+//            auto wtks = (wtks_dn * wtks_up < 0.) ? (wtks_up - wtks_dn) / 2 : 0.;
+//            ret.push_back(wtks);
+//
+//            if (UNLIKELY(m_gt != nullptr))
+//            {
+//                auto ref = (*m_gt)[(six - NSKIP) * NQRY + qix];
+//                if (std::abs(ref - wtks) >= 0.001)
+//                {
+//                    std::cout << "Sig: " << six + 1 << ", Query: " << qix + 1 \
+//                        << " Ref: " << ref << " WTKS: " << wtks << " up/dn " << wtks_up << ' ' << wtks_dn << '\n';
+//                }
+//            }
         }
     }
 
