@@ -58,10 +58,6 @@ add_executable( check
     src/test.cpp
 )
 
-add_executable( run_seq
-    src/run_seq.cpp
-    src/query_parser.cpp
-)
 
 target_link_libraries( check
     ${GTEST_BOTH_LIBRARIES}
@@ -69,7 +65,19 @@ target_link_libraries( check
     ${CMAKE_THREAD_LIBS_INIT}
 )
 
+add_executable( run_seq
+    src/run_seq.cpp
+    src/query_parser.cpp
+)
 target_link_libraries( run_seq
+    ${CMAKE_THREAD_LIBS_INIT}
+)
+
+add_executable( run_conc
+    src/run_conc.cpp
+    src/query_parser.cpp
+)
+target_link_libraries( run_conc
     ${CMAKE_THREAD_LIBS_INIT}
 )
 

@@ -19,3 +19,4 @@ cachegrind*
 scoresBySig*
 ranksBySig*
 run_seq
+run_conc
