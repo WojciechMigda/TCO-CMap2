@@ -57,6 +57,7 @@ enum { PARAM_ROWS_PER_CHUNK_DBL = 20000 };
 
 
 using size_type = std::size_t;
+using ssize_type = ssize_t;
 
 using stream_index_t = unsigned int;
 using score_index_t = std::uint16_t;
@@ -149,6 +150,20 @@ void load_from_file(
     //fseek(ifile, pos * sizeof (Tp), SEEK_SET);
     auto nread = fread(obuf_p, sizeof (Tp), nelem, ifile);
     std::cout << "Read t= " << std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - t0).count() << std::endl;
+    assert(nread == nelem);
+}
+
+template<typename Tp>
+void load_from_file(
+    Tp * obuf_p,
+    int idesc,
+    size_type pos,
+    size_type nelem)
+{
+    auto t0 = std::chrono::high_resolution_clock::now();
+    //fseek(ifile, pos * sizeof (Tp), SEEK_SET);
+    auto nread = read(idesc, obuf_p, sizeof (Tp) * nelem);
+    std::cout << "Read2 t= " << std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - t0).count() << std::endl;
     assert(nread == nelem);
 }
 
@@ -346,10 +361,12 @@ void producer(producer_ctx_t const & ctx)
 
     jobs[1].worker = std::thread([](){});
 
-    FILE * isig_file = fopen(sigs_fn, "rb");
-    fseek(isig_file, ctx.SIG_BEGIN * NGENES * sizeof (float), SEEK_SET);
-    posix_fadvise(fileno(isig_file), ctx.SIG_BEGIN * NGENES * sizeof (float), ctx.SIG_END * NGENES * sizeof (float), POSIX_FADV_SEQUENTIAL);
-    posix_fadvise(fileno(isig_file), ctx.SIG_BEGIN * NGENES * sizeof (float), ctx.SIG_END * NGENES * sizeof (float), POSIX_FADV_NOREUSE);
+    //FILE * isig_file = fopen(sigs_fn, "rb");
+    auto isig_file = open(sigs_fn, O_RDONLY);
+    //fseek(isig_file, ctx.SIG_BEGIN * NGENES * sizeof (float), SEEK_SET);
+    lseek(isig_file, ctx.SIG_BEGIN * NGENES * sizeof (float), SEEK_SET);
+    posix_fadvise(/*fileno*/(isig_file), ctx.SIG_BEGIN * NGENES * sizeof (float), ctx.SIG_END * NGENES * sizeof (float), POSIX_FADV_SEQUENTIAL);
+    posix_fadvise(/*fileno*/(isig_file), ctx.SIG_BEGIN * NGENES * sizeof (float), ctx.SIG_END * NGENES * sizeof (float), POSIX_FADV_NOREUSE);
 
     FILE * irank_file = fopen(ranks_fn, "rb");
     fseek(irank_file, ctx.SIG_BEGIN * NGENES * sizeof (std::uint16_t), SEEK_SET);
@@ -386,7 +403,8 @@ void producer(producer_ctx_t const & ctx)
     jobs_p[1]->worker.join();
     wtks_saver(ofile, jobs_p[1]->ctx.owtks, jobs_p[1]->ctx.SIG_BEGIN * NQRY, (jobs_p[1]->ctx.SIG_END - jobs_p[1]->ctx.SIG_BEGIN) * NQRY);
 
-    fclose(isig_file);
+    //fclose(isig_file);
+    close(isig_file);
     fclose(irank_file);
     fclose(ofile);
 
