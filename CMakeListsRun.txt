@@ -1,0 +1,67 @@
+################################################################################
+project( "TCO-CMAP2" C CXX )
+
+cmake_minimum_required( VERSION 2.8.3 )
+
+set( CMAKE_ECLIPSE_VERSION 3.8 )
+set( _ECLIPSE_VERSION 3.8 )
+
+set( CMAKE_CXX_COMPILER_ARG1 -std=c++11 ) ### for Eclipse's discovery extra arguments
+
+
+#add_definitions( -O0 -ggdb -std=c++11 -Wall -pedantic -msse4.2 -march=westmere )
+#add_definitions( -O2 -ggdb -std=c++11 -Wall -pedantic -mmmx -msse -msse2 -msse3 -s -pipe -Wno-sign-compare -march=native )
+#add_definitions( -O2 -g -unroll-loops -std=c++11 -Wall -pedantic -msse4.2 -s -pipe -Wno-sign-compare -march=native )
+add_definitions( -O3 -DNDEBUG -g -unroll-loops -std=c++11 -Wall -s -pipe -Wno-sign-compare -mavx -march=native )
+
+################################################################################
+
+#find_package( Boost REQUIRED COMPONENTS program_options )
+
+################################################################################
+
+include_directories(
+    src
+    cpplinq/CppLinq
+#    ${Boost_INCLUDE_DIR}
+)
+
+################################################################################
+
+add_executable( main
+    src/main.cpp
+    src/parse_options.cpp
+    src/ground_truth.cpp
+    src/query_parser.cpp
+    src/CMAPLib.cpp
+)
+
+#target_link_libraries( main ${Boost_LIBRARIES} )
+
+set( CMAKE_MODULE_PATH ${CMAKE_CURRENT_LIST_DIR}/cmake-modules )
+
+find_package( Threads REQUIRED )
+
+include_directories(
+    src
+    ${GMOCK_INCLUDE_DIR}
+    ${GTEST_INCLUDE_DIR}
+)
+
+add_executable( run_seq
+    src/run_seq.cpp
+    src/query_parser.cpp
+)
+target_link_libraries( run_seq
+    ${CMAKE_THREAD_LIBS_INIT}
+)
+
+add_executable( run_conc
+    src/run_conc.cpp
+    src/query_parser.cpp
+)
+target_link_libraries( run_conc
+    ${CMAKE_THREAD_LIBS_INIT}
+)
+
+################################################################################
