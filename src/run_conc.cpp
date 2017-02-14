@@ -49,6 +49,7 @@
 #include <xmmintrin.h>
 #include <emmintrin.h>
 
+//#define USE_MMAP
 
 enum {NGENES = 10174};
 enum {NSIGS = 476251};
@@ -348,10 +349,12 @@ void producer(producer_ctx_t const & ctx)
     //auto const BATCH_SZ = 512 + 4 * ctx.cpuid;
     auto const NQRY = ctx.q_up_indexed->size();
 
+#ifndef USE_MMAP
     jobs[0].ctx.sigs = static_cast<float *>(malloc(BATCH_SZ * NGENES * sizeof (float)));
     jobs[1].ctx.sigs = static_cast<float *>(malloc(BATCH_SZ * NGENES * sizeof (float)));
     jobs[0].ctx.ranks = static_cast<std::uint16_t *>(malloc(BATCH_SZ * NGENES * sizeof (std::uint16_t)));
     jobs[1].ctx.ranks = static_cast<std::uint16_t *>(malloc(BATCH_SZ * NGENES * sizeof (std::uint16_t)));
+#endif
     jobs[0].ctx.owtks = static_cast<double *>(malloc(BATCH_SZ * NQRY * sizeof (double)));
     jobs[1].ctx.owtks = static_cast<double *>(malloc(BATCH_SZ * NQRY * sizeof (double)));
 
@@ -362,17 +365,53 @@ void producer(producer_ctx_t const & ctx)
 
     jobs[1].worker = std::thread([](){});
 
-    //FILE * isig_file = fopen(sigs_fn, "rb");
     auto isig_file = open(sigs_fn, O_RDONLY);
-    //fseek(isig_file, ctx.SIG_BEGIN * NGENES * sizeof (float), SEEK_SET);
+#ifndef USE_MMAP
     lseek(isig_file, ctx.SIG_BEGIN * NGENES * sizeof (float), SEEK_SET);
-    posix_fadvise(/*fileno*/(isig_file), ctx.SIG_BEGIN * NGENES * sizeof (float), ctx.SIG_END * NGENES * sizeof (float), POSIX_FADV_SEQUENTIAL);
-    posix_fadvise(/*fileno*/(isig_file), ctx.SIG_BEGIN * NGENES * sizeof (float), ctx.SIG_END * NGENES * sizeof (float), POSIX_FADV_NOREUSE);
+#endif
+    posix_fadvise(isig_file, ctx.SIG_BEGIN * NGENES * sizeof (float), ctx.SIG_END * NGENES * sizeof (float), POSIX_FADV_SEQUENTIAL);
+    posix_fadvise(isig_file, ctx.SIG_BEGIN * NGENES * sizeof (float), ctx.SIG_END * NGENES * sizeof (float), POSIX_FADV_NOREUSE);
 
-    FILE * irank_file = fopen(ranks_fn, "rb");
-    fseek(irank_file, ctx.SIG_BEGIN * NGENES * sizeof (std::uint16_t), SEEK_SET);
-    posix_fadvise(fileno(irank_file), ctx.SIG_BEGIN * NGENES * sizeof (std::uint16_t), ctx.SIG_END * NGENES * sizeof (std::uint16_t), POSIX_FADV_SEQUENTIAL);
-    posix_fadvise(fileno(irank_file), ctx.SIG_BEGIN * NGENES * sizeof (std::uint16_t), ctx.SIG_END * NGENES * sizeof (std::uint16_t), POSIX_FADV_NOREUSE);
+#ifdef USE_MMAP
+    auto const page_size = sysconf (_SC_PAGESIZE);
+
+    auto isig_offset = ctx.SIG_BEGIN * NGENES * sizeof (float);
+    auto isig_page_delta = isig_offset % page_size;
+    auto isig_mm_p = mmap(
+        0,
+        (ctx.SIG_END - ctx.SIG_BEGIN) * NGENES * sizeof (float) + isig_page_delta,
+        PROT_READ,
+        MAP_PRIVATE,
+        isig_file,
+        isig_offset - isig_page_delta);
+    if (UNLIKELY(isig_mm_p == MAP_FAILED))
+    {
+        std::cout << "Mmap failed on " << sigs_fn << " offset " << ctx.SIG_BEGIN * NGENES * sizeof (float) << std::endl;
+    }
+#endif
+
+    auto irank_file = open(ranks_fn, O_RDONLY);
+#ifndef USE_MMAP
+    lseek(irank_file, ctx.SIG_BEGIN * NGENES * sizeof (std::uint16_t), SEEK_SET);
+#endif
+    posix_fadvise(irank_file, ctx.SIG_BEGIN * NGENES * sizeof (std::uint16_t), ctx.SIG_END * NGENES * sizeof (std::uint16_t), POSIX_FADV_SEQUENTIAL);
+    posix_fadvise(irank_file, ctx.SIG_BEGIN * NGENES * sizeof (std::uint16_t), ctx.SIG_END * NGENES * sizeof (std::uint16_t), POSIX_FADV_NOREUSE);
+
+#ifdef USE_MMAP
+    auto irank_offset = ctx.SIG_BEGIN * NGENES * sizeof (std::uint16_t);
+    auto irank_page_delta = irank_offset % page_size;
+    auto irank_mm_p = mmap(
+        0,
+        (ctx.SIG_END - ctx.SIG_BEGIN) * NGENES * sizeof (std::uint16_t) + irank_page_delta,
+        PROT_READ,
+        MAP_PRIVATE,
+        irank_file,
+        irank_offset - irank_page_delta);
+    if (UNLIKELY(irank_mm_p == MAP_FAILED))
+    {
+        std::cout << "Mmap failed on " << ranks_fn << " offset " << ctx.SIG_BEGIN * NGENES * sizeof (std::uint16_t) << std::endl;
+    }
+#endif
 
     FILE * ofile = fopen(ctx.o_wtks_fname, "r+b");
     fseek(ofile, ctx.SIG_BEGIN * NQRY * sizeof (double), SEEK_SET);
@@ -381,10 +420,18 @@ void producer(producer_ctx_t const & ctx)
     {
         auto const nrows = std::min<size_type>(ctx.SIG_END - six, BATCH_SZ);
 
+#ifndef USE_MMAP
         load_from_file<float>(
             jobs_p[0]->ctx.sigs, isig_file, six * NGENES, nrows * NGENES);
+#else
+        jobs_p[0]->ctx.sigs = (float *)((char *)isig_mm_p + isig_page_delta) + (six - ctx.SIG_BEGIN) * NGENES;
+#endif
+#ifndef USE_MMAP
         load_from_file<std::uint16_t>(
             jobs_p[0]->ctx.ranks, irank_file, six * NGENES, nrows * NGENES);
+#else
+        jobs_p[0]->ctx.ranks = (std::uint16_t *)((char *)irank_mm_p + irank_page_delta) + (six - ctx.SIG_BEGIN) * NGENES;
+#endif
 
         jobs_p[0]->ctx.SIG_BEGIN = six;
         jobs_p[0]->ctx.SIG_END = six + nrows;
@@ -404,15 +451,21 @@ void producer(producer_ctx_t const & ctx)
     jobs_p[1]->worker.join();
     wtks_saver(ofile, jobs_p[1]->ctx.owtks, jobs_p[1]->ctx.SIG_BEGIN * NQRY, (jobs_p[1]->ctx.SIG_END - jobs_p[1]->ctx.SIG_BEGIN) * NQRY);
 
-    //fclose(isig_file);
+#ifdef USE_MMAP
+    munmap(isig_mm_p, (ctx.SIG_END - ctx.SIG_BEGIN) * NGENES * sizeof (float));
+    munmap(irank_mm_p, (ctx.SIG_END - ctx.SIG_BEGIN) * NGENES * sizeof (std::uint16_t));
+#endif
+
     close(isig_file);
-    fclose(irank_file);
+    close(irank_file);
     fclose(ofile);
 
+#ifndef USE_MMAP
     free(jobs[0].ctx.sigs);
     free(jobs[1].ctx.sigs);
     free(jobs[0].ctx.ranks);
     free(jobs[1].ctx.ranks);
+#endif
     free(jobs[0].ctx.owtks);
     free(jobs[1].ctx.owtks);
 }
@@ -521,7 +574,7 @@ int main(int argc, char ** argv)
     std::thread threads[NTHR];
     // TODO testing
     for (auto tix = 0u; tix < NTHR; ++tix)
-    //for (auto tix = 0u; tix < 1; ++tix)
+    //for (auto tix = 1u; tix < 2; ++tix)
     {
         threads[tix] = std::thread(producer, ctx[tix]);
 
@@ -530,7 +583,7 @@ int main(int argc, char ** argv)
     }
 
     for (auto tix = 0u; tix < NTHR; ++tix)
-    //for (auto tix = 0u; tix < 1; ++tix)
+    //for (auto tix = 1u; tix < 2; ++tix)
     {
         threads[tix].join();
     }
