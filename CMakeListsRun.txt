@@ -28,13 +28,13 @@ include_directories(
 
 ################################################################################
 
-add_executable( main
-    src/main.cpp
-    src/parse_options.cpp
-    src/ground_truth.cpp
-    src/query_parser.cpp
-    src/CMAPLib.cpp
-)
+#add_executable( main
+#    src/main.cpp
+#    src/parse_options.cpp
+#    src/ground_truth.cpp
+#    src/query_parser.cpp
+#    src/CMAPLib.cpp
+#)
 
 #target_link_libraries( main ${Boost_LIBRARIES} )
 
@@ -44,8 +44,6 @@ find_package( Threads REQUIRED )
 
 include_directories(
     src
-    ${GMOCK_INCLUDE_DIR}
-    ${GTEST_INCLUDE_DIR}
 )
 
 add_executable( run_seq
