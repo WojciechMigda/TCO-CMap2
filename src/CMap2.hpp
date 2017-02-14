@@ -24,10 +24,10 @@
 #ifndef SRC_CMAP2_HPP_
 #define SRC_CMAP2_HPP_
 
+#include "unsafevector.hpp"
 #include "chunked.hpp"
 #include "CMAPLib.hpp"
 #include "query_parser.hpp"
-
 #include "simd.hpp"
 
 #include "likely.h"
@@ -174,39 +174,28 @@ CMAP2Updated::getWTKScomb(std::vector<std::string> & q_up, std::vector<std::stri
     auto const q_up_indexed = q_indexer(q_up);
     auto const q_dn_indexed = q_indexer(q_dn);
 
-//    typedef struct
-//    {
-//        std::vector<score_index_t> ixs;
-////        __v4sf min_max;
-//    } query_stream_t;
-
     using stream_index_t = unsigned int;
 
-    using query_stream_t = std::vector<score_index_t>;
+    using query_stream_t = unsafe_vector<score_index_t>;
 
-//    std::vector<query_stream_t> q_up_streams(NQRY);
-//    std::vector<query_stream_t> q_dn_streams(NQRY);
     // both up and down queries
     std::vector<query_stream_t> q_streams(2 * NQRY);
     std::vector<float> mins(2 * NQRY);
     std::vector<float> maxs(2 * NQRY);
 
     std::vector<query_stream_t *> gene_buckets[NGENES];
-    //std::vector<stream_index_t> gene_buckets[NGENES];
 
     for (stream_index_t qix = 0u; qix < NQRY; ++qix)
     {
-        q_streams[2 * qix + 0]./*ixs.*/reserve(200);
-        q_streams[2 * qix + 1]./*ixs.*/reserve(200);
+        q_streams[2 * qix + 0].reserve(200);
+        q_streams[2 * qix + 1].reserve(200);
 
         for (auto const gene_ix : q_up_indexed[qix])
         {
-            //gene_buckets[gene_ix].push_back(2 * qix + 0);
             gene_buckets[gene_ix].push_back(&q_streams[2 * qix + 0]);
         }
         for (auto const gene_ix : q_dn_indexed[qix])
         {
-            //gene_buckets[gene_ix].push_back(2 * qix + 1);
             gene_buckets[gene_ix].push_back(&q_streams[2 * qix + 1]);
         }
     }
@@ -215,12 +204,11 @@ CMAP2Updated::getWTKScomb(std::vector<std::string> & q_up, std::vector<std::stri
     std::iota(proc_order.begin(), proc_order.end(), 0);
 
     // sort query streams by ascending score indices vector size
-    // TODO
     std::sort(proc_order.begin(), proc_order.end(),
         [&q_up_indexed, &q_dn_indexed](stream_index_t p, stream_index_t q)
         {
-            std::vector<query_stream_t> const & sp = p % 2 ? q_dn_indexed : q_up_indexed;
-            std::vector<query_stream_t> const & sq = q % 2 ? q_dn_indexed : q_up_indexed;
+            std::vector<query_indexed_t> const & sp = p % 2 ? q_dn_indexed : q_up_indexed;
+            std::vector<query_indexed_t> const & sq = q % 2 ? q_dn_indexed : q_up_indexed;
 
             p /= 2;
             q /= 2;
@@ -246,18 +234,13 @@ CMAP2Updated::getWTKScomb(std::vector<std::string> & q_up, std::vector<std::stri
 
             for (auto q_stream_ix : gene_buckets[inv_rank])
             {
-                //q_streams[q_stream_ix].ixs.push_back(gix);
-                q_stream_ix->/*ixs.*/push_back(gix);
+                q_stream_ix->push_back(gix);
             }
         }
 
         auto const N4 = NQRY / 2;
         for (auto b4_ix = 0u; b4_ix < N4; ++b4_ix)
         {
-//            auto qsix1 = 4 * b4_ix + 0;
-//            auto qsix2 = 4 * b4_ix + 1;
-//            auto qsix3 = 4 * b4_ix + 2;
-//            auto qsix4 = 4 * b4_ix + 3;
             auto qsix1 = proc_order[4 * b4_ix + 0];
             auto qsix2 = proc_order[4 * b4_ix + 1];
             auto qsix3 = proc_order[4 * b4_ix + 2];
@@ -275,13 +258,23 @@ CMAP2Updated::getWTKScomb(std::vector<std::string> & q_up, std::vector<std::stri
         {
             auto qsix1 = proc_order[4 * N4 + 0];
             auto qsix2 = proc_order[4 * N4 + 1];
+            // duplicates, so I can reuse the 4-way version
+            auto qsix3 = proc_order[4 * N4 + 0];
+            auto qsix4 = proc_order[4 * N4 + 1];
 
-            calc_min_max_2(
+            calc_min_max_4(
                 q_streams[qsix1], q_streams[qsix2],
+                q_streams[qsix3], q_streams[qsix4],
                 sigs,
                 NGENES,
-                mins[qsix1], mins[qsix2],
-                maxs[qsix1], maxs[qsix2]);
+                mins[qsix1], mins[qsix2], mins[qsix3], mins[qsix4],
+                maxs[qsix1], maxs[qsix2], maxs[qsix3], maxs[qsix4]);
+//            calc_min_max_2(
+//                q_streams[qsix1], q_streams[qsix2],
+//                sigs,
+//                NGENES,
+//                mins[qsix1], mins[qsix2],
+//                maxs[qsix1], maxs[qsix2]);
         }
 
         for (auto b4_ix = 0u; b4_ix < N4; ++b4_ix)
@@ -297,6 +290,7 @@ CMAP2Updated::getWTKScomb(std::vector<std::string> & q_up, std::vector<std::stri
                 _wtks = (wtks[0] - wtks[1]) / 2;
             }
             ret.push_back(_wtks);
+
                         if (UNLIKELY(m_gt != nullptr))
                         {
                             auto ref = (*m_gt)[(six - NSKIP) * NQRY + b4_ix * 2 + 0];
@@ -314,6 +308,7 @@ CMAP2Updated::getWTKScomb(std::vector<std::string> & q_up, std::vector<std::stri
                 _wtks = (wtks[2] - wtks[3]) / 2;
             }
             ret.push_back(_wtks);
+
                         if (UNLIKELY(m_gt != nullptr))
                         {
                             auto ref = (*m_gt)[(six - NSKIP) * NQRY + b4_ix * 2 + 1];
@@ -324,7 +319,6 @@ CMAP2Updated::getWTKScomb(std::vector<std::string> & q_up, std::vector<std::stri
                             }
                         }
         }
-        // TODO dla nieparzystego
         if (UNLIKELY(NQRY % 2))
         {
             auto _min = (__v4sf)_mm_cvtsi64_si128(pack_2f(mins[4 * N4 + 0], mins[4 * N4 + 1]));
@@ -349,56 +343,6 @@ CMAP2Updated::getWTKScomb(std::vector<std::string> & q_up, std::vector<std::stri
                             }
                         }
 
-        }
-
-
-        for (auto qix = 0u; qix < NQRY; ++qix)
-        {
-
-//            double wtks_up;
-//            double wtks_dn;
-//
-//            if (maxs[2 * qix + 0] > std::abs(mins[2 * qix + 0]))
-//            {
-//                wtks_up = maxs[2 * qix + 0];
-//            }
-//            else
-//            {
-//                wtks_up = mins[2 * qix + 0];
-//            }
-//            if (maxs[2 * qix + 1] > std::abs(mins[2 * qix + 1]))
-//            {
-//                wtks_dn = maxs[2 * qix + 1];
-//            }
-//            else
-//            {
-//                wtks_dn = mins[2 * qix + 1];
-//            }
-//            auto wtks = (wtks_dn * wtks_up < 0.) ? (wtks_up - wtks_dn) / 2 : 0.;
-//            ret.push_back(wtks);
-        }
-
-        for (auto qix = 0u; qix < NQRY; ++qix)
-        {
-
-//            double wtks_up_dn[2];
-//            //calc_wtks_2(q_streams[proc_order[2 * qix]].ixs, q_streams[proc_order[2 * qix + 1]].ixs, sigs, NGENES, wtks_up_dn);
-//            calc_wtks_2(q_streams[2 * qix]/*.ixs*/, q_streams[2 * qix + 1]/*.ixs*/, sigs, NGENES, wtks_up_dn);
-//            auto wtks_up = wtks_up_dn[0];
-//            auto wtks_dn = wtks_up_dn[1];
-//
-//            auto wtks = (wtks_dn * wtks_up < 0.) ? (wtks_up - wtks_dn) / 2 : 0.;
-//            ret.push_back(wtks);
-//
-//            if (UNLIKELY(m_gt != nullptr))
-//            {
-//                auto ref = (*m_gt)[(six - NSKIP) * NQRY + qix];
-//                if (std::abs(ref - wtks) >= 0.001)
-//                {
-//                    std::cout << "Sig: " << six + 1 << ", Query: " << qix + 1 \
-//                        << " Ref: " << ref << " WTKS: " << wtks << " up/dn " << wtks_up << ' ' << wtks_dn << '\n';
-//                }
-//            }
         }
     }
 

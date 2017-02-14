@@ -24,6 +24,7 @@
 #include "query_parser.hpp"
 #include "simd.hpp"
 #include "likely.h"
+#include "unsafevector.hpp"
 
 #include "cpplinq.hpp"
 
@@ -190,7 +191,7 @@ void worker(worker_ctx_t const & ctx)
     auto & q_up_indexed = *ctx.q_up_indexed_p;
     auto & q_dn_indexed = *ctx.q_dn_indexed_p;
 
-    using query_stream_t = std::vector<score_index_t>;
+    using query_stream_t = unsafe_vector<score_index_t>;
 
     auto const NQRY = q_up_indexed.size();
     auto const NQSTREAMS = 2 * NQRY;
