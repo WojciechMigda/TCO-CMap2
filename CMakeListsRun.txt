@@ -62,4 +62,8 @@ target_link_libraries( run_conc
     ${CMAKE_THREAD_LIBS_INIT}
 )
 
+add_executable( data_builder
+    src/data_builder.cpp
+)
+
 ################################################################################
