@@ -44,6 +44,7 @@
 #include <pthread.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <sys/mman.h>
 
 #include <xmmintrin.h>
 #include <emmintrin.h>
@@ -57,6 +58,7 @@ enum { PARAM_ROWS_PER_CHUNK_DBL = 20000 };
 
 
 using size_type = std::size_t;
+using ssize_type = ssize_t;
 
 using stream_index_t = unsigned int;
 using score_index_t = std::uint16_t;
