@@ -24,6 +24,8 @@
 #ifndef SRC_SIMD_HPP_
 #define SRC_SIMD_HPP_
 
+#include "unsafevector.hpp"
+
 #include <cstdint>
 #include <cstddef>
 #include <algorithm>
@@ -31,6 +33,8 @@
 
 #include <xmmintrin.h>
 #include <emmintrin.h>
+
+using query_stream_t = unsafe_vector<std::uint16_t>;
 
 static inline
 std::uint64_t pack_2f(float fa, float fb)
@@ -47,7 +51,7 @@ std::uint64_t pack_2f(float fa, float fb)
 }
 
 static inline
-/*constexpr*/ __m128 abs_mask(void)
+__m128 abs_mask(void)
 {
     __m128i minus1 = _mm_set1_epi32(-1);
     return _mm_castsi128_ps(_mm_srli_epi32(minus1, 1));
@@ -55,8 +59,8 @@ static inline
 
 static inline
 void calc_min_max_2(
-    std::vector<std::uint16_t> const & stream1,
-    std::vector<std::uint16_t> const & stream2,
+    query_stream_t const & stream1,
+    query_stream_t const & stream2,
     float const * sigs,
     unsigned int NGENES,
     float & omin1,
@@ -145,10 +149,10 @@ void calc_min_max_2(
 
 static inline
 void calc_min_max_4(
-    std::vector<std::uint16_t> const & stream1,
-    std::vector<std::uint16_t> const & stream2,
-    std::vector<std::uint16_t> const & stream3,
-    std::vector<std::uint16_t> const & stream4,
+    query_stream_t const & stream1,
+    query_stream_t const & stream2,
+    query_stream_t const & stream3,
+    query_stream_t const & stream4,
     float const * sigs,
     unsigned int NGENES,
     float & omin1,
