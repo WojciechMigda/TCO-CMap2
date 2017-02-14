@@ -38,8 +38,12 @@
 #include <algorithm>
 #include <thread>
 #include <cstddef>
+#include <chrono>
+#include <cstring>
 
 #include <pthread.h>
+#include <fcntl.h>
+#include <unistd.h>
 
 #include <xmmintrin.h>
 #include <emmintrin.h>
@@ -133,26 +137,19 @@ auto read_genes_to_indices_map = [](char const * fname)
     return gene_to_idx;
 };
 
+
 template<typename Tp>
 void load_from_file(
     Tp * obuf_p,
-    std::string const & fname,
+    FILE * ifile,
     size_type pos,
     size_type nelem)
 {
-    FILE * ifile = fopen(fname.c_str(), "rb");
-
-    if (LIKELY(ifile != nullptr))
-    {
-        fseek(ifile, pos * sizeof (Tp), SEEK_SET);
-        auto nread = fread(obuf_p, sizeof (Tp), nelem, ifile);
-        assert(nread == nelem);
-        fclose(ifile);
-    }
-    else
-    {
-        std::cout << "Failed to open file " << fname << std::endl;
-    }
+    auto t0 = std::chrono::high_resolution_clock::now();
+    //fseek(ifile, pos * sizeof (Tp), SEEK_SET);
+    auto nread = fread(obuf_p, sizeof (Tp), nelem, ifile);
+    std::cout << "Read t= " << std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - t0).count() << std::endl;
+    assert(nread == nelem);
 }
 
 typedef struct
@@ -168,8 +165,6 @@ typedef struct
     float * sigs;
     std::uint16_t * ranks;
     double * owtks;
-
-    char const * o_wtks_fname;
 } worker_ctx_t;
 
 void worker(worker_ctx_t const & ctx)
@@ -316,17 +311,11 @@ void producer(producer_ctx_t const & ctx)
     char const * sigs_fn = "../data/scoresBySigSortedAbsF32";
     char const * ranks_fn = "../data/ranksBySigInv";
 
-    auto wtks_saver = [](char const * fname, double const * owtks, size_type pos, size_type n)
+    auto wtks_saver = [](FILE * ofile, double const * owtks, size_type pos, size_type n)
     {
-        FILE * ofile = fopen(fname, "r+b");
-        if (ofile == nullptr)
-        {
-            std::cout << "Open failed for " << fname << std::endl;
-        }
-        fseek(ofile, pos * sizeof (double), SEEK_SET);
+//        fseek(ofile, pos * sizeof (double), SEEK_SET);
         fwrite(owtks, sizeof (double), n, ofile);
-        std::cout << "Wrote " << n << " records at " << pos << std::endl;
-        fclose(ofile);
+        //std::cout << "Wrote " << n << " records at " << pos << std::endl;
     };
 
     typedef struct
@@ -336,9 +325,11 @@ void producer(producer_ctx_t const & ctx)
     } job_t;
 
     job_t jobs[2];
+    memset(jobs, 0, sizeof (jobs));
     job_t * jobs_p[2] = {&jobs[0], &jobs[1]};
 
     enum { BATCH_SZ = 512 };
+    //auto const BATCH_SZ = 512 + 4 * ctx.cpuid;
     auto const NQRY = ctx.q_up_indexed->size();
 
     jobs[0].ctx.sigs = static_cast<float *>(malloc(BATCH_SZ * NGENES * sizeof (float)));
@@ -348,8 +339,6 @@ void producer(producer_ctx_t const & ctx)
     jobs[0].ctx.owtks = static_cast<double *>(malloc(BATCH_SZ * NQRY * sizeof (double)));
     jobs[1].ctx.owtks = static_cast<double *>(malloc(BATCH_SZ * NQRY * sizeof (double)));
 
-    jobs[0].ctx.o_wtks_fname = ctx.o_wtks_fname;
-    jobs[1].ctx.o_wtks_fname = ctx.o_wtks_fname;
     jobs[0].ctx.q_up_indexed_p = ctx.q_up_indexed;
     jobs[1].ctx.q_up_indexed_p = ctx.q_up_indexed;
     jobs[0].ctx.q_dn_indexed_p = ctx.q_dn_indexed;
@@ -357,14 +346,27 @@ void producer(producer_ctx_t const & ctx)
 
     jobs[1].worker = std::thread([](){});
 
+    FILE * isig_file = fopen(sigs_fn, "rb");
+    fseek(isig_file, ctx.SIG_BEGIN * NGENES * sizeof (float), SEEK_SET);
+    posix_fadvise(fileno(isig_file), ctx.SIG_BEGIN * NGENES * sizeof (float), ctx.SIG_END * NGENES * sizeof (float), POSIX_FADV_SEQUENTIAL);
+    posix_fadvise(fileno(isig_file), ctx.SIG_BEGIN * NGENES * sizeof (float), ctx.SIG_END * NGENES * sizeof (float), POSIX_FADV_NOREUSE);
+
+    FILE * irank_file = fopen(ranks_fn, "rb");
+    fseek(irank_file, ctx.SIG_BEGIN * NGENES * sizeof (std::uint16_t), SEEK_SET);
+    posix_fadvise(fileno(irank_file), ctx.SIG_BEGIN * NGENES * sizeof (std::uint16_t), ctx.SIG_END * NGENES * sizeof (std::uint16_t), POSIX_FADV_SEQUENTIAL);
+    posix_fadvise(fileno(irank_file), ctx.SIG_BEGIN * NGENES * sizeof (std::uint16_t), ctx.SIG_END * NGENES * sizeof (std::uint16_t), POSIX_FADV_NOREUSE);
+
+    FILE * ofile = fopen(ctx.o_wtks_fname, "r+b");
+    fseek(ofile, ctx.SIG_BEGIN * NQRY * sizeof (double), SEEK_SET);
+
     for (auto six = ctx.SIG_BEGIN; six < ctx.SIG_END; six += BATCH_SZ)
     {
         auto const nrows = std::min<size_type>(ctx.SIG_END - six, BATCH_SZ);
 
         load_from_file<float>(
-            jobs_p[0]->ctx.sigs, sigs_fn, six * NGENES, nrows * NGENES);
+            jobs_p[0]->ctx.sigs, isig_file, six * NGENES, nrows * NGENES);
         load_from_file<std::uint16_t>(
-            jobs_p[0]->ctx.ranks, ranks_fn, six * NGENES, nrows * NGENES);
+            jobs_p[0]->ctx.ranks, irank_file, six * NGENES, nrows * NGENES);
 
         jobs_p[0]->ctx.SIG_BEGIN = six;
         jobs_p[0]->ctx.SIG_END = six + nrows;
@@ -376,13 +378,17 @@ void producer(producer_ctx_t const & ctx)
         jobs_p[0]->worker = std::thread(worker, jobs_p[0]->ctx);
 //        set_affinity(jobs_p[0]->worker.native_handle(), ctx.cpuid);
 
-        wtks_saver(ctx.o_wtks_fname, jobs_p[1]->ctx.owtks, jobs_p[1]->ctx.SIG_BEGIN * NQRY, (jobs_p[1]->ctx.SIG_END - jobs_p[1]->ctx.SIG_BEGIN) * NQRY);
+        wtks_saver(ofile, jobs_p[1]->ctx.owtks, jobs_p[1]->ctx.SIG_BEGIN * NQRY, (jobs_p[1]->ctx.SIG_END - jobs_p[1]->ctx.SIG_BEGIN) * NQRY);
 
         std::swap(jobs_p[0], jobs_p[1]);
     }
 
     jobs_p[1]->worker.join();
-    wtks_saver(ctx.o_wtks_fname, jobs_p[1]->ctx.owtks, jobs_p[1]->ctx.SIG_BEGIN * NQRY, (jobs_p[1]->ctx.SIG_END - jobs_p[1]->ctx.SIG_BEGIN) * NQRY);
+    wtks_saver(ofile, jobs_p[1]->ctx.owtks, jobs_p[1]->ctx.SIG_BEGIN * NQRY, (jobs_p[1]->ctx.SIG_END - jobs_p[1]->ctx.SIG_BEGIN) * NQRY);
+
+    fclose(isig_file);
+    fclose(irank_file);
+    fclose(ofile);
 
     free(jobs[0].ctx.sigs);
     free(jobs[1].ctx.sigs);
@@ -455,14 +461,24 @@ int main(int argc, char ** argv)
         std::cout << "Cannot create/open for writing: " << o_wtks_fname << std::endl;
         return 1;
     }
+    // truncate
+    {
+        auto len = NSIGS * q_up_indexed.size() * sizeof (double);
+        auto out = fileno(ofile);
+        if ((fallocate(out, 0, 0, len) == -1) && (errno == EOPNOTSUPP))
+        {
+            ftruncate(out, len);
+        }
+    }
+
     fclose(ofile);
 
     ////////////////////////////////////////////////////////////////////////////
 
     std::cout << "Hardware concurrency " << std::thread::hardware_concurrency() << std::endl;
 
-    //auto const NTHR = std::thread::hardware_concurrency();
-    auto const NTHR = std::thread::hardware_concurrency() / 2; // TODO testing
+    auto const NTHR = std::thread::hardware_concurrency();
+    //auto const NTHR = std::thread::hardware_concurrency() - 1; // TODO testing
 
     std::vector<size_type> ranges(NTHR + 1);
     ranges.front() = 0;
