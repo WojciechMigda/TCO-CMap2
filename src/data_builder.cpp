@@ -126,4 +126,16 @@ int main(int argc, char ** argv)
 
     fclose(isigf);
     fclose(irankf);
+
+    std::cout << "Done\n\n";
+
+    std::cout << "Expected checksums:\n";
+    std::cout << "sha1sum scoresBySigSortedAbsF32\n\n";
+
+    std::cout << "8b043a2f4af2be3e4c3d587565ed4b957c1a2dd5  scoresBySigSortedAbsF32\n\n";
+
+    std::cout << "Expected checksums:\n";
+    std::cout << "sha1sum ranksBySigInv\n\n";
+
+    std::cout << "49c2d91d509e49ed86714561b4a93fee94cc39b7  ranksBySigInv\n\n";
 }

@@ -211,16 +211,22 @@ CMAP2Updated::getWTKScomb(std::vector<std::string> & q_up, std::vector<std::stri
         }
     }
 
-//    std::vector<stream_index_t> proc_order(q_streams.size());
-//    std::iota(proc_order.begin(), proc_order.end(), 0);
+    std::vector<stream_index_t> proc_order(q_streams.size());
+    std::iota(proc_order.begin(), proc_order.end(), 0);
 
     // sort query streams by ascending score indices vector size
     // TODO
-//    std::sort(proc_order.begin(), proc_order.end(),
-//        [&q_streams](stream_index_t p, stream_index_t q)
-//        {
-//            return q_streams[p].ixs.size() < q_streams[q].ixs.size();
-//        });
+    std::sort(proc_order.begin(), proc_order.end(),
+        [&q_up_indexed, &q_dn_indexed](stream_index_t p, stream_index_t q)
+        {
+            std::vector<query_stream_t> const & sp = p % 2 ? q_dn_indexed : q_up_indexed;
+            std::vector<query_stream_t> const & sq = q % 2 ? q_dn_indexed : q_up_indexed;
+
+            p /= 2;
+            q /= 2;
+
+            return sp[p].size() < sq[q].size();
+        });
 
     for (auto six = NSKIP; six < NSIG; ++six)
     {
@@ -248,38 +254,34 @@ CMAP2Updated::getWTKScomb(std::vector<std::string> & q_up, std::vector<std::stri
         auto const N4 = NQRY / 2;
         for (auto b4_ix = 0u; b4_ix < N4; ++b4_ix)
         {
+//            auto qsix1 = 4 * b4_ix + 0;
+//            auto qsix2 = 4 * b4_ix + 1;
+//            auto qsix3 = 4 * b4_ix + 2;
+//            auto qsix4 = 4 * b4_ix + 3;
+            auto qsix1 = proc_order[4 * b4_ix + 0];
+            auto qsix2 = proc_order[4 * b4_ix + 1];
+            auto qsix3 = proc_order[4 * b4_ix + 2];
+            auto qsix4 = proc_order[4 * b4_ix + 3];
+
             calc_min_max_4(
-                q_streams[4 * b4_ix + 0], q_streams[4 * b4_ix + 1],
-                q_streams[4 * b4_ix + 2], q_streams[4 * b4_ix + 3],
+                q_streams[qsix1], q_streams[qsix2],
+                q_streams[qsix3], q_streams[qsix4],
                 sigs,
                 NGENES,
-                mins[4 * b4_ix + 0], mins[4 * b4_ix + 1],
-                mins[4 * b4_ix + 2], mins[4 * b4_ix + 3],
-                maxs[4 * b4_ix + 0], maxs[4 * b4_ix + 1],
-                maxs[4 * b4_ix + 2], maxs[4 * b4_ix + 3]);
-
-//            calc_min_max_2(
-//                q_streams[4 * b4_ix + 0], q_streams[4 * b4_ix + 1],
-//                sigs,
-//                NGENES,
-//                mins[4 * b4_ix + 0], mins[4 * b4_ix + 1],
-//                maxs[4 * b4_ix + 0], maxs[4 * b4_ix + 1]);
-//
-//            calc_min_max_2(
-//                q_streams[4 * b4_ix + 2], q_streams[4 * b4_ix + 3],
-//                sigs,
-//                NGENES,
-//                mins[4 * b4_ix + 2], mins[4 * b4_ix + 3],
-//                maxs[4 * b4_ix + 2], maxs[4 * b4_ix + 3]);
+                mins[qsix1], mins[qsix2], mins[qsix3], mins[qsix4],
+                maxs[qsix1], maxs[qsix2], maxs[qsix3], maxs[qsix4]);
         }
         if (UNLIKELY(NQRY % 2))
         {
+            auto qsix1 = proc_order[4 * N4 + 0];
+            auto qsix2 = proc_order[4 * N4 + 1];
+
             calc_min_max_2(
-                q_streams[4 * N4 + 0], q_streams[4 * N4 + 1],
+                q_streams[qsix1], q_streams[qsix2],
                 sigs,
                 NGENES,
-                mins[4 * N4 + 0], mins[4 * N4 + 1],
-                maxs[4 * N4 + 0], maxs[4 * N4 + 1]);
+                mins[qsix1], mins[qsix2],
+                maxs[qsix1], maxs[qsix2]);
         }
 
         for (auto b4_ix = 0u; b4_ix < N4; ++b4_ix)
