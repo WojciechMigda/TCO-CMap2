@@ -151,30 +151,58 @@ auto read_genes_to_indices_map = [](char const * fname)
 template<typename Tp>
 void load_from_file(
     Tp * obuf_p,
-    FILE * ifile,
-    size_type pos,
-    size_type nelem)
-{
-    //auto t0 = std::chrono::high_resolution_clock::now();
-    //fseek(ifile, pos * sizeof (Tp), SEEK_SET);
-    auto nread = fread(obuf_p, sizeof (Tp), nelem, ifile);
-    //std::cout << "Read t= " << std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - t0).count() << std::endl;
-    assert(nread == nelem);
-}
-
-template<typename Tp>
-void load_from_file(
-    Tp * obuf_p,
     int idesc,
     size_type pos,
     size_type nelem)
 {
     //auto t0 = std::chrono::high_resolution_clock::now();
     //fseek(ifile, pos * sizeof (Tp), SEEK_SET);
-    auto nread = read(idesc, obuf_p, sizeof (Tp) * nelem);
+    char * op = (char *)obuf_p;
+    auto to_read = sizeof (Tp) * nelem;
+    ssize_type nread = 0;
+    do
+    {
+        nread = read(idesc, op, to_read);
+        if (UNLIKELY(nread == -1))
+        {
+            assert(errno == EINTR);
+            continue;
+        }
+        else
+        {
+            to_read -= nread;
+            op += nread;
+        }
+    } while (to_read != 0);
     //std::cout << "Read2 t= " << std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - t0).count() << std::endl;
     assert(nread == sizeof (Tp) * nelem);
 }
+
+
+template <typename Tp>
+void wtks_saver(int odesc, Tp const * ibuf_p, size_type pos, size_type n)
+{
+    char const * ip = (char const *)ibuf_p;
+    auto to_write = sizeof (Tp) * n;
+    ssize_type nwr = 0;
+    do
+    {
+        nwr = write(odesc, ip, to_write);
+        if (UNLIKELY(nwr == -1))
+        {
+            assert(errno == EINTR);
+            continue;
+        }
+        else
+        {
+            to_write -= nwr;
+            ip += nwr;
+        }
+    } while (to_write != 0);
+
+    //std::cout << "Wrote " << n << " records at " << pos << std::endl;
+}
+
 
 typedef struct
 {
@@ -360,13 +388,6 @@ void producer(producer_ctx_t const & ctx)
     char const * sigs_fn = "../data/scoresBySigSortedAbsF32";
     char const * ranks_fn = "../data/ranksBySigInv";
 
-    auto wtks_saver = [](FILE * ofile, double const * owtks, size_type pos, size_type n)
-    {
-//        fseek(ofile, pos * sizeof (double), SEEK_SET);
-        fwrite(owtks, sizeof (double), n, ofile);
-        //std::cout << "Wrote " << n << " records at " << pos << std::endl;
-    };
-
     typedef struct
     {
         std::thread worker;
@@ -378,7 +399,6 @@ void producer(producer_ctx_t const & ctx)
     job_t * jobs_p[2] = {&jobs[0], &jobs[1]};
 
     enum { BATCH_SZ = 512 };
-    //auto const BATCH_SZ = 512 + 4 * ctx.cpuid;
     auto const NQRY = ctx.q_up_indexed->size();
 
 #ifndef USE_MMAP
@@ -445,8 +465,8 @@ void producer(producer_ctx_t const & ctx)
     }
 #endif
 
-    FILE * ofile = fopen(ctx.o_wtks_fname, "r+b");
-    fseek(ofile, ctx.SIG_BEGIN * NQRY * sizeof (double), SEEK_SET);
+    auto ofile = open(ctx.o_wtks_fname, O_WRONLY);
+    lseek(ofile, ctx.SIG_BEGIN * NQRY * sizeof (double), SEEK_SET);
 
     for (auto six = ctx.SIG_BEGIN; six < ctx.SIG_END; six += BATCH_SZ)
     {
@@ -475,13 +495,13 @@ void producer(producer_ctx_t const & ctx)
         jobs_p[0]->worker = std::thread(worker, jobs_p[0]->ctx);
         set_affinity(jobs_p[0]->worker.native_handle(), ctx.cpuid);
 
-        wtks_saver(ofile, jobs_p[1]->ctx.owtks, jobs_p[1]->ctx.SIG_BEGIN * NQRY, (jobs_p[1]->ctx.SIG_END - jobs_p[1]->ctx.SIG_BEGIN) * NQRY);
+        wtks_saver<double>(ofile, jobs_p[1]->ctx.owtks, jobs_p[1]->ctx.SIG_BEGIN * NQRY, (jobs_p[1]->ctx.SIG_END - jobs_p[1]->ctx.SIG_BEGIN) * NQRY);
 
         std::swap(jobs_p[0], jobs_p[1]);
     }
 
     jobs_p[1]->worker.join();
-    wtks_saver(ofile, jobs_p[1]->ctx.owtks, jobs_p[1]->ctx.SIG_BEGIN * NQRY, (jobs_p[1]->ctx.SIG_END - jobs_p[1]->ctx.SIG_BEGIN) * NQRY);
+    wtks_saver<double>(ofile, jobs_p[1]->ctx.owtks, jobs_p[1]->ctx.SIG_BEGIN * NQRY, (jobs_p[1]->ctx.SIG_END - jobs_p[1]->ctx.SIG_BEGIN) * NQRY);
 
 #ifdef USE_MMAP
     munmap(isig_mm_p, (ctx.SIG_END - ctx.SIG_BEGIN) * NGENES * sizeof (float));
@@ -490,7 +510,7 @@ void producer(producer_ctx_t const & ctx)
 
     close(isig_file);
     close(irank_file);
-    fclose(ofile);
+    close(ofile);
 
 #ifndef USE_MMAP
     free(jobs[0].ctx.sigs);
