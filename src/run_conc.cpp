@@ -205,6 +205,8 @@ void wtks_saver(int odesc, Tp const * ibuf_p, size_type pos, size_type n)
 }
 
 
+using query_stream_t = unsafe_vector<score_index_t>;
+
 typedef struct
 {
     std::vector<query_indexed_t> const * q_up_indexed_p;
@@ -217,57 +219,31 @@ typedef struct
 
     float * sigs;
     std::uint16_t * ranks;
+    float * mins;
+    float * maxs;
     double * owtks;
+    std::vector<query_stream_t> q_streams;
+    std::vector<stream_index_t> proc_order;
+    std::vector<query_stream_t *> gene_buckets[NGENES];
 } worker_ctx_t;
 
-void worker(worker_ctx_t const & ctx)
+void worker(worker_ctx_t * ctx_p)
 {
+    auto & ctx = *ctx_p;
     std::cout << "Worker " << ctx.id << ", sigs=[" << ctx.SIG_BEGIN << ',' << ctx.SIG_END << ')' << std::endl;
     auto & q_up_indexed = *ctx.q_up_indexed_p;
-    auto & q_dn_indexed = *ctx.q_dn_indexed_p;
-
-    using query_stream_t = unsafe_vector<score_index_t>;
 
     auto const NQRY = q_up_indexed.size();
     auto const NQSTREAMS = 2 * NQRY;
 
-    std::vector<query_stream_t> q_streams(NQSTREAMS);
+    auto & q_streams = ctx.q_streams;
+    auto const & gene_buckets = ctx.gene_buckets;
+    auto const & proc_order = ctx.proc_order;
 
-    std::vector<query_stream_t *> gene_buckets[NGENES];
-
-    for (stream_index_t qix = 0u; qix < NQRY; ++qix)
-    {
-        q_streams[2 * qix + 0].reserve(200);
-        q_streams[2 * qix + 1].reserve(200);
-
-        for (auto const gene_ix : q_up_indexed[qix])
-        {
-            gene_buckets[gene_ix].push_back(&q_streams[2 * qix + 0]);
-        }
-        for (auto const gene_ix : q_dn_indexed[qix])
-        {
-            gene_buckets[gene_ix].push_back(&q_streams[2 * qix + 1]);
-        }
-    }
-
-    std::vector<stream_index_t> proc_order(q_streams.size());
-    std::iota(proc_order.begin(), proc_order.end(), 0);
-
-    // sort query streams by ascending score indices vector size
-    std::sort(proc_order.begin(), proc_order.end(),
-        [&q_up_indexed, &q_dn_indexed](stream_index_t p, stream_index_t q)
-        {
-            std::vector<query_indexed_t> const & sp = p % 2 ? q_dn_indexed : q_up_indexed;
-            std::vector<query_indexed_t> const & sq = q % 2 ? q_dn_indexed : q_up_indexed;
-
-            p /= 2;
-            q /= 2;
-
-            return sp[p].size() < sq[q].size();
-        });
-
-    auto mins = static_cast<float *>(malloc(sizeof (float) * NQSTREAMS));
-    auto maxs = static_cast<float *>(malloc(sizeof (float) * NQSTREAMS));
+//    auto mins = static_cast<float *>(malloc(sizeof (float) * NQSTREAMS));
+//    auto maxs = static_cast<float *>(malloc(sizeof (float) * NQSTREAMS));
+    auto mins = ctx.mins;
+    auto maxs = ctx.maxs;
 
     size_type ret_ix = 0;
 
@@ -365,8 +341,8 @@ void worker(worker_ctx_t const & ctx)
 
     }
 
-    free(mins);
-    free(maxs);
+//    free(mins);
+//    free(maxs);
 
 }
 
@@ -381,6 +357,7 @@ typedef struct
 
     char const * o_wtks_fname;
 } producer_ctx_t;
+
 
 void producer(producer_ctx_t const & ctx)
 {
@@ -401,24 +378,65 @@ void producer(producer_ctx_t const & ctx)
 
     enum { BATCH_SZ = 512 };
     auto const NQRY = ctx.q_up_indexed->size();
+    auto const NQSTREAMS = 2 * NQRY;
+
+
+    ////////////////////////////////////////////////////////////////////////////
+    ////////////////////////////////////////////////////////////////////////////
+
+    auto worker_ctx_initialize = [NQRY, NQSTREAMS, &ctx](worker_ctx_t & wctx)
+    {
+        wctx.sigs = static_cast<float *>(malloc(BATCH_SZ * NGENES * sizeof (float)));
+        wctx.ranks = static_cast<std::uint16_t *>(malloc(BATCH_SZ * NGENES * sizeof (std::uint16_t)));
+        wctx.owtks = static_cast<double *>(malloc(BATCH_SZ * NQRY * sizeof (double)));
+
+        wctx.q_up_indexed_p = ctx.q_up_indexed;
+        wctx.q_dn_indexed_p = ctx.q_dn_indexed;
+
+        wctx.q_streams = std::vector<query_stream_t>(NQSTREAMS);
+        for (auto & qs : wctx.q_streams) { qs.reserve(200); }
+
+        for (stream_index_t qix = 0u; qix < NQRY; ++qix)
+        {
+            for (auto const gene_ix : (*ctx.q_up_indexed)[qix])
+            {
+                wctx.gene_buckets[gene_ix].push_back(&wctx.q_streams[2 * qix + 0]);
+            }
+            for (auto const gene_ix : (*ctx.q_dn_indexed)[qix])
+            {
+                wctx.gene_buckets[gene_ix].push_back(&wctx.q_streams[2 * qix + 1]);
+            }
+        }
+
+        wctx.proc_order = std::vector<stream_index_t>(wctx.q_streams.size());
+        std::iota(wctx.proc_order.begin(), wctx.proc_order.end(), 0);
+
+        // sort query streams by ascending score indices vector size
+        std::sort(wctx.proc_order.begin(), wctx.proc_order.end(),
+            [&ctx](stream_index_t p, stream_index_t q)
+            {
+                std::vector<query_indexed_t> const & sp = p % 2 ? (*ctx.q_dn_indexed) : (*ctx.q_up_indexed);
+                std::vector<query_indexed_t> const & sq = q % 2 ? (*ctx.q_dn_indexed) : (*ctx.q_up_indexed);
+
+                p /= 2;
+                q /= 2;
+
+                return sp[p].size() < sq[q].size();
+            });
+
+        wctx.mins = static_cast<float *>(malloc(sizeof (float) * NQSTREAMS));
+        wctx.maxs = static_cast<float *>(malloc(sizeof (float) * NQSTREAMS));
+    };
+
+    worker_ctx_initialize(jobs[0].ctx);
+    worker_ctx_initialize(jobs[1].ctx);
 
 
     ////////////////////////////////////////////////////////////////////////////
     ////////////////////////////////////////////////////////////////////////////
 
 
-    jobs[0].ctx.sigs = static_cast<float *>(malloc(BATCH_SZ * NGENES * sizeof (float)));
-    jobs[1].ctx.sigs = static_cast<float *>(malloc(BATCH_SZ * NGENES * sizeof (float)));
-    jobs[0].ctx.ranks = static_cast<std::uint16_t *>(malloc(BATCH_SZ * NGENES * sizeof (std::uint16_t)));
-    jobs[1].ctx.ranks = static_cast<std::uint16_t *>(malloc(BATCH_SZ * NGENES * sizeof (std::uint16_t)));
-    jobs[0].ctx.owtks = static_cast<double *>(malloc(BATCH_SZ * NQRY * sizeof (double)));
-    jobs[1].ctx.owtks = static_cast<double *>(malloc(BATCH_SZ * NQRY * sizeof (double)));
-
-    jobs[0].ctx.q_up_indexed_p = ctx.q_up_indexed;
-    jobs[1].ctx.q_up_indexed_p = ctx.q_up_indexed;
-    jobs[0].ctx.q_dn_indexed_p = ctx.q_dn_indexed;
-    jobs[1].ctx.q_dn_indexed_p = ctx.q_dn_indexed;
-
+    // stub worker so I can join it later in the loop
     jobs[1].worker = std::thread([](){});
 
     auto isig_file = open(sigs_fn, O_RDONLY);
@@ -468,7 +486,7 @@ void producer(producer_ctx_t const & ctx)
 
         jobs_p[1]->worker.join();
 
-        jobs_p[0]->worker = std::thread(worker, jobs_p[0]->ctx);
+        jobs_p[0]->worker = std::thread(worker, &jobs_p[0]->ctx);
         set_affinity(jobs_p[0]->worker.native_handle(), ctx.cpuid);
 
         wtks_saver<double>(ofile, jobs_p[1]->ctx.owtks, jobs_p[1]->ctx.SIG_BEGIN * NQRY, (jobs_p[1]->ctx.SIG_END - jobs_p[1]->ctx.SIG_BEGIN) * NQRY);
@@ -488,12 +506,17 @@ void producer(producer_ctx_t const & ctx)
     close(irank_file);
     close(ofile);
 
-    free(jobs[0].ctx.sigs);
-    free(jobs[1].ctx.sigs);
-    free(jobs[0].ctx.ranks);
-    free(jobs[1].ctx.ranks);
-    free(jobs[0].ctx.owtks);
-    free(jobs[1].ctx.owtks);
+    auto worker_ctx_destroy = [](worker_ctx_t const & wctx)
+    {
+        free(wctx.sigs);
+        free(wctx.ranks);
+        free(wctx.owtks);
+        free(wctx.mins);
+        free(wctx.maxs);
+    };
+
+    worker_ctx_destroy(jobs[0].ctx);
+    worker_ctx_destroy(jobs[1].ctx);
 }
 
 int main(int argc, char ** argv)
