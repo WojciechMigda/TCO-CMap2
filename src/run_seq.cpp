@@ -199,6 +199,9 @@ void worker_fn(worker_ctx_t const & ctx)
         500,
         NSIGS, PARAM_ROWS_PER_CHUNK_DBL> score_cache("scoresBySigSortedAbsF32");
 
+    auto & q_up_indexed = ctx.q_up_indexed;
+    auto & q_dn_indexed = ctx.q_dn_indexed;
+
     using query_stream_t = unsafe_vector<score_index_t>;
 
     auto const NQRY = ctx.q_up_indexed.size();
@@ -222,6 +225,22 @@ void worker_fn(worker_ctx_t const & ctx)
             gene_buckets[gene_ix].push_back(&q_streams[2 * qix + 1]);
         }
     }
+
+    std::vector<stream_index_t> proc_order(q_streams.size());
+    std::iota(proc_order.begin(), proc_order.end(), 0);
+
+    // sort query streams by ascending score indices vector size
+    std::sort(proc_order.begin(), proc_order.end(),
+        [&q_up_indexed, &q_dn_indexed](stream_index_t p, stream_index_t q)
+        {
+            std::vector<query_indexed_t> const & sp = p % 2 ? q_dn_indexed : q_up_indexed;
+            std::vector<query_indexed_t> const & sq = q % 2 ? q_dn_indexed : q_up_indexed;
+
+            p /= 2;
+            q /= 2;
+
+            return sp[p].size() < sq[q].size();
+        });
 
     auto mins = static_cast<float *>(malloc(sizeof (float) * NQSTREAMS));
     auto maxs = static_cast<float *>(malloc(sizeof (float) * NQSTREAMS));
@@ -253,25 +272,35 @@ void worker_fn(worker_ctx_t const & ctx)
 
         for (auto b4_ix = 0u; b4_ix < N4; ++b4_ix)
         {
+            auto qsix1 = proc_order[4 * b4_ix + 0];
+            auto qsix2 = proc_order[4 * b4_ix + 1];
+            auto qsix3 = proc_order[4 * b4_ix + 2];
+            auto qsix4 = proc_order[4 * b4_ix + 3];
+
             calc_min_max_4(
-                q_streams[4 * b4_ix + 0], q_streams[4 * b4_ix + 1],
-                q_streams[4 * b4_ix + 2], q_streams[4 * b4_ix + 3],
+                q_streams[qsix1], q_streams[qsix2],
+                q_streams[qsix3], q_streams[qsix4],
                 sigs,
                 NGENES,
-                mins[4 * b4_ix + 0], mins[4 * b4_ix + 1],
-                mins[4 * b4_ix + 2], mins[4 * b4_ix + 3],
-                maxs[4 * b4_ix + 0], maxs[4 * b4_ix + 1],
-                maxs[4 * b4_ix + 2], maxs[4 * b4_ix + 3]);
+                mins[qsix1], mins[qsix2], mins[qsix3], mins[qsix4],
+                maxs[qsix1], maxs[qsix2], maxs[qsix3], maxs[qsix4]);
 
         }
         if (UNLIKELY(NQRY % 2))
         {
-            calc_min_max_2(
-                q_streams[4 * N4 + 0], q_streams[4 * N4 + 1],
+            auto qsix1 = proc_order[4 * N4 + 0];
+            auto qsix2 = proc_order[4 * N4 + 1];
+            // duplicates, so I can reuse the 4-way version
+            auto qsix3 = proc_order[4 * N4 + 0];
+            auto qsix4 = proc_order[4 * N4 + 1];
+
+            calc_min_max_4(
+                q_streams[qsix1], q_streams[qsix2],
+                q_streams[qsix3], q_streams[qsix4],
                 sigs,
                 NGENES,
-                mins[4 * N4 + 0], mins[4 * N4 + 1],
-                maxs[4 * N4 + 0], maxs[4 * N4 + 1]);
+                mins[qsix1], mins[qsix2], mins[qsix3], mins[qsix4],
+                maxs[qsix1], maxs[qsix2], maxs[qsix3], maxs[qsix4]);
         }
 
 
