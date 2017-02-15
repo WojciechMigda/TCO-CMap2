@@ -167,7 +167,7 @@ void load_from_file(
     //fseek(ifile, pos * sizeof (Tp), SEEK_SET);
     auto nread = read(idesc, obuf_p, sizeof (Tp) * nelem);
     std::cout << "Read2 t= " << std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - t0).count() << std::endl;
-    assert(nread == nelem);
+    assert(nread == sizeof (Tp) * nelem);
 }
 
 typedef struct
@@ -215,6 +215,22 @@ void worker(worker_ctx_t const & ctx)
         }
     }
 
+    std::vector<stream_index_t> proc_order(q_streams.size());
+    std::iota(proc_order.begin(), proc_order.end(), 0);
+
+    // sort query streams by ascending score indices vector size
+    std::sort(proc_order.begin(), proc_order.end(),
+        [&q_up_indexed, &q_dn_indexed](stream_index_t p, stream_index_t q)
+        {
+            std::vector<query_indexed_t> const & sp = p % 2 ? q_dn_indexed : q_up_indexed;
+            std::vector<query_indexed_t> const & sq = q % 2 ? q_dn_indexed : q_up_indexed;
+
+            p /= 2;
+            q /= 2;
+
+            return sp[p].size() < sq[q].size();
+        });
+
     auto mins = static_cast<float *>(malloc(sizeof (float) * NQSTREAMS));
     auto maxs = static_cast<float *>(malloc(sizeof (float) * NQSTREAMS));
 
@@ -244,25 +260,34 @@ void worker(worker_ctx_t const & ctx)
 
         for (auto b4_ix = 0u; b4_ix < N4; ++b4_ix)
         {
+            auto qsix1 = proc_order[4 * b4_ix + 0];
+            auto qsix2 = proc_order[4 * b4_ix + 1];
+            auto qsix3 = proc_order[4 * b4_ix + 2];
+            auto qsix4 = proc_order[4 * b4_ix + 3];
+
             calc_min_max_4(
-                q_streams[4 * b4_ix + 0], q_streams[4 * b4_ix + 1],
-                q_streams[4 * b4_ix + 2], q_streams[4 * b4_ix + 3],
+                q_streams[qsix1], q_streams[qsix2],
+                q_streams[qsix3], q_streams[qsix4],
                 sigs,
                 NGENES,
-                mins[4 * b4_ix + 0], mins[4 * b4_ix + 1],
-                mins[4 * b4_ix + 2], mins[4 * b4_ix + 3],
-                maxs[4 * b4_ix + 0], maxs[4 * b4_ix + 1],
-                maxs[4 * b4_ix + 2], maxs[4 * b4_ix + 3]);
-
+                mins[qsix1], mins[qsix2], mins[qsix3], mins[qsix4],
+                maxs[qsix1], maxs[qsix2], maxs[qsix3], maxs[qsix4]);
         }
         if (UNLIKELY(NQRY % 2))
         {
-            calc_min_max_2(
-                q_streams[4 * N4 + 0], q_streams[4 * N4 + 1],
+            auto qsix1 = proc_order[4 * N4 + 0];
+            auto qsix2 = proc_order[4 * N4 + 1];
+            // duplicates, so I can reuse the 4-way version
+            auto qsix3 = proc_order[4 * N4 + 0];
+            auto qsix4 = proc_order[4 * N4 + 1];
+
+            calc_min_max_4(
+                q_streams[qsix1], q_streams[qsix2],
+                q_streams[qsix3], q_streams[qsix4],
                 sigs,
                 NGENES,
-                mins[4 * N4 + 0], mins[4 * N4 + 1],
-                maxs[4 * N4 + 0], maxs[4 * N4 + 1]);
+                mins[qsix1], mins[qsix2], mins[qsix3], mins[qsix4],
+                maxs[qsix1], maxs[qsix2], maxs[qsix3], maxs[qsix4]);
         }
 
 
@@ -442,7 +467,7 @@ void producer(producer_ctx_t const & ctx)
         jobs_p[1]->worker.join();
 
         jobs_p[0]->worker = std::thread(worker, jobs_p[0]->ctx);
-//        set_affinity(jobs_p[0]->worker.native_handle(), ctx.cpuid);
+        set_affinity(jobs_p[0]->worker.native_handle(), ctx.cpuid);
 
         wtks_saver(ofile, jobs_p[1]->ctx.owtks, jobs_p[1]->ctx.SIG_BEGIN * NQRY, (jobs_p[1]->ctx.SIG_END - jobs_p[1]->ctx.SIG_BEGIN) * NQRY);
 
