@@ -269,12 +269,6 @@ CMAP2Updated::getWTKScomb(std::vector<std::string> & q_up, std::vector<std::stri
                 NGENES,
                 mins[qsix1], mins[qsix2], mins[qsix3], mins[qsix4],
                 maxs[qsix1], maxs[qsix2], maxs[qsix3], maxs[qsix4]);
-//            calc_min_max_2(
-//                q_streams[qsix1], q_streams[qsix2],
-//                sigs,
-//                NGENES,
-//                mins[qsix1], mins[qsix2],
-//                maxs[qsix1], maxs[qsix2]);
         }
 
         for (auto b4_ix = 0u; b4_ix < N4; ++b4_ix)
