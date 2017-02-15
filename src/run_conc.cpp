@@ -92,6 +92,12 @@ std::vector<std::string>
 read_file_csv(const char * fname)
 {
     std::ifstream fcsv(fname);
+    if (!fcsv.is_open())
+    {
+        std::cout << "Failed to open " << fname << std::endl;
+        exit(1);
+    }
+
     std::vector<std::string> vcsv;
 
     for (std::string line; std::getline(fcsv, line); /* nop */)
@@ -149,10 +155,10 @@ void load_from_file(
     size_type pos,
     size_type nelem)
 {
-    auto t0 = std::chrono::high_resolution_clock::now();
+    //auto t0 = std::chrono::high_resolution_clock::now();
     //fseek(ifile, pos * sizeof (Tp), SEEK_SET);
     auto nread = fread(obuf_p, sizeof (Tp), nelem, ifile);
-    std::cout << "Read t= " << std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - t0).count() << std::endl;
+    //std::cout << "Read t= " << std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - t0).count() << std::endl;
     assert(nread == nelem);
 }
 
@@ -163,10 +169,10 @@ void load_from_file(
     size_type pos,
     size_type nelem)
 {
-    auto t0 = std::chrono::high_resolution_clock::now();
+    //auto t0 = std::chrono::high_resolution_clock::now();
     //fseek(ifile, pos * sizeof (Tp), SEEK_SET);
     auto nread = read(idesc, obuf_p, sizeof (Tp) * nelem);
-    std::cout << "Read2 t= " << std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - t0).count() << std::endl;
+    //std::cout << "Read2 t= " << std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - t0).count() << std::endl;
     assert(nread == sizeof (Tp) * nelem);
 }
 
@@ -576,7 +582,6 @@ int main(int argc, char ** argv)
     std::cout << "Hardware concurrency " << std::thread::hardware_concurrency() << std::endl;
 
     auto const NTHR = std::thread::hardware_concurrency();
-    //auto const NTHR = std::thread::hardware_concurrency() - 1; // TODO testing
 
     std::vector<size_type> ranges(NTHR + 1);
     ranges.front() = 0;
