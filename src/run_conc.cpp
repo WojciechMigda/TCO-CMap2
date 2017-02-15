@@ -86,6 +86,7 @@ int set_affinity(std::thread::native_handle_type tid, unsigned int cpuid)
     {
         std::cout << "pthread_setaffinity_np failed for " << cpuid << std::endl;
     }
+    return rc;
 }
 
 std::vector<std::string>
@@ -94,7 +95,7 @@ read_file_csv(const char * fname)
     std::ifstream fcsv(fname);
     if (!fcsv.is_open())
     {
-        std::cout << "Failed to open " << fname << std::endl;
+        std::cout << "Failed to open CSV query file " << fname << std::endl;
         exit(1);
     }
 
@@ -118,7 +119,7 @@ auto read_genes_to_indices_map = [](char const * fname)
 
     if (UNLIKELY(ifile == nullptr))
     {
-        std::cout << "Failed to open " << fname << std::endl;
+        std::cout << "Failed to open genes file " << fname << std::endl;
     }
     else
     {
@@ -401,12 +402,15 @@ void producer(producer_ctx_t const & ctx)
     enum { BATCH_SZ = 512 };
     auto const NQRY = ctx.q_up_indexed->size();
 
-#ifndef USE_MMAP
+
+    ////////////////////////////////////////////////////////////////////////////
+    ////////////////////////////////////////////////////////////////////////////
+
+
     jobs[0].ctx.sigs = static_cast<float *>(malloc(BATCH_SZ * NGENES * sizeof (float)));
     jobs[1].ctx.sigs = static_cast<float *>(malloc(BATCH_SZ * NGENES * sizeof (float)));
     jobs[0].ctx.ranks = static_cast<std::uint16_t *>(malloc(BATCH_SZ * NGENES * sizeof (std::uint16_t)));
     jobs[1].ctx.ranks = static_cast<std::uint16_t *>(malloc(BATCH_SZ * NGENES * sizeof (std::uint16_t)));
-#endif
     jobs[0].ctx.owtks = static_cast<double *>(malloc(BATCH_SZ * NQRY * sizeof (double)));
     jobs[1].ctx.owtks = static_cast<double *>(malloc(BATCH_SZ * NQRY * sizeof (double)));
 
@@ -418,72 +422,44 @@ void producer(producer_ctx_t const & ctx)
     jobs[1].worker = std::thread([](){});
 
     auto isig_file = open(sigs_fn, O_RDONLY);
-#ifndef USE_MMAP
+    if (UNLIKELY(isig_file == -1))
+    {
+        std::cout << "Failed to open signature file " << sigs_fn << std::endl;
+    }
     lseek(isig_file, ctx.SIG_BEGIN * NGENES * sizeof (float), SEEK_SET);
-#endif
     posix_fadvise(isig_file, ctx.SIG_BEGIN * NGENES * sizeof (float), ctx.SIG_END * NGENES * sizeof (float), POSIX_FADV_SEQUENTIAL);
     posix_fadvise(isig_file, ctx.SIG_BEGIN * NGENES * sizeof (float), ctx.SIG_END * NGENES * sizeof (float), POSIX_FADV_NOREUSE);
 
-#ifdef USE_MMAP
-    auto const page_size = sysconf (_SC_PAGESIZE);
-
-    auto isig_offset = ctx.SIG_BEGIN * NGENES * sizeof (float);
-    auto isig_page_delta = isig_offset % page_size;
-    auto isig_mm_p = mmap(
-        0,
-        (ctx.SIG_END - ctx.SIG_BEGIN) * NGENES * sizeof (float) + isig_page_delta,
-        PROT_READ,
-        MAP_PRIVATE,
-        isig_file,
-        isig_offset - isig_page_delta);
-    if (UNLIKELY(isig_mm_p == MAP_FAILED))
-    {
-        std::cout << "Mmap failed on " << sigs_fn << " offset " << ctx.SIG_BEGIN * NGENES * sizeof (float) << std::endl;
-    }
-#endif
 
     auto irank_file = open(ranks_fn, O_RDONLY);
-#ifndef USE_MMAP
+    if (UNLIKELY(irank_file == -1))
+    {
+        std::cout << "Failed to open ranks file " << irank_file << std::endl;
+    }
     lseek(irank_file, ctx.SIG_BEGIN * NGENES * sizeof (std::uint16_t), SEEK_SET);
-#endif
     posix_fadvise(irank_file, ctx.SIG_BEGIN * NGENES * sizeof (std::uint16_t), ctx.SIG_END * NGENES * sizeof (std::uint16_t), POSIX_FADV_SEQUENTIAL);
     posix_fadvise(irank_file, ctx.SIG_BEGIN * NGENES * sizeof (std::uint16_t), ctx.SIG_END * NGENES * sizeof (std::uint16_t), POSIX_FADV_NOREUSE);
 
-#ifdef USE_MMAP
-    auto irank_offset = ctx.SIG_BEGIN * NGENES * sizeof (std::uint16_t);
-    auto irank_page_delta = irank_offset % page_size;
-    auto irank_mm_p = mmap(
-        0,
-        (ctx.SIG_END - ctx.SIG_BEGIN) * NGENES * sizeof (std::uint16_t) + irank_page_delta,
-        PROT_READ,
-        MAP_PRIVATE,
-        irank_file,
-        irank_offset - irank_page_delta);
-    if (UNLIKELY(irank_mm_p == MAP_FAILED))
-    {
-        std::cout << "Mmap failed on " << ranks_fn << " offset " << ctx.SIG_BEGIN * NGENES * sizeof (std::uint16_t) << std::endl;
-    }
-#endif
-
     auto ofile = open(ctx.o_wtks_fname, O_WRONLY);
+    if (UNLIKELY(ofile == -1))
+    {
+        std::cout << "Failed to open output WTKS file " << ctx.o_wtks_fname << std::endl;
+    }
     lseek(ofile, ctx.SIG_BEGIN * NQRY * sizeof (double), SEEK_SET);
+
+
+    ////////////////////////////////////////////////////////////////////////////
+    ////////////////////////////////////////////////////////////////////////////
+
 
     for (auto six = ctx.SIG_BEGIN; six < ctx.SIG_END; six += BATCH_SZ)
     {
         auto const nrows = std::min<size_type>(ctx.SIG_END - six, BATCH_SZ);
 
-#ifndef USE_MMAP
         load_from_file<float>(
             jobs_p[0]->ctx.sigs, isig_file, six * NGENES, nrows * NGENES);
-#else
-        jobs_p[0]->ctx.sigs = (float *)((char *)isig_mm_p + isig_page_delta) + (six - ctx.SIG_BEGIN) * NGENES;
-#endif
-#ifndef USE_MMAP
         load_from_file<std::uint16_t>(
             jobs_p[0]->ctx.ranks, irank_file, six * NGENES, nrows * NGENES);
-#else
-        jobs_p[0]->ctx.ranks = (std::uint16_t *)((char *)irank_mm_p + irank_page_delta) + (six - ctx.SIG_BEGIN) * NGENES;
-#endif
 
         jobs_p[0]->ctx.SIG_BEGIN = six;
         jobs_p[0]->ctx.SIG_END = six + nrows;
@@ -503,21 +479,19 @@ void producer(producer_ctx_t const & ctx)
     jobs_p[1]->worker.join();
     wtks_saver<double>(ofile, jobs_p[1]->ctx.owtks, jobs_p[1]->ctx.SIG_BEGIN * NQRY, (jobs_p[1]->ctx.SIG_END - jobs_p[1]->ctx.SIG_BEGIN) * NQRY);
 
-#ifdef USE_MMAP
-    munmap(isig_mm_p, (ctx.SIG_END - ctx.SIG_BEGIN) * NGENES * sizeof (float));
-    munmap(irank_mm_p, (ctx.SIG_END - ctx.SIG_BEGIN) * NGENES * sizeof (std::uint16_t));
-#endif
+
+    ////////////////////////////////////////////////////////////////////////////
+    ////////////////////////////////////////////////////////////////////////////
+
 
     close(isig_file);
     close(irank_file);
     close(ofile);
 
-#ifndef USE_MMAP
     free(jobs[0].ctx.sigs);
     free(jobs[1].ctx.sigs);
     free(jobs[0].ctx.ranks);
     free(jobs[1].ctx.ranks);
-#endif
     free(jobs[0].ctx.owtks);
     free(jobs[1].ctx.owtks);
 }
@@ -591,7 +565,8 @@ int main(int argc, char ** argv)
         auto out = fileno(ofile);
         if ((fallocate(out, 0, 0, len) == -1) && (errno == EOPNOTSUPP))
         {
-            ftruncate(out, len);
+            auto ret = ftruncate(out, len);
+            (void)ret;
         }
     }
 
