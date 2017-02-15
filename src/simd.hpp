@@ -58,6 +58,7 @@ __m128 abs_mask(void)
 }
 
 
+// invariant: streams are passed in ascending order of their sizes.
 static inline
 void calc_min_max_4(
     query_stream_t const & stream1,
@@ -76,30 +77,38 @@ void calc_min_max_4(
     float & omax4)
 {
     __v4sf vsums = (__v4sf)_mm_setzero_ps();
-    auto min_run = std::min(std::min(stream1.size(), stream2.size()), std::min(stream3.size(), stream4.size()));
+    auto min_run34 = std::min(stream3.size(), stream4.size());
+    auto min_run234 = std::min(stream2.size(), min_run34);
+    auto min_run1234 = std::min(stream1.size(), min_run234);
     {
         auto stix = 0u;
-        for (; stix < min_run; ++stix)
+        // doing 1,2,3,4
+        for (; stix < min_run1234; ++stix)
         {
             auto packed_scores12 = pack_2f(sigs[stream1[stix]], sigs[stream2[stix]]);
             auto packed_scores34 = pack_2f(sigs[stream3[stix]], sigs[stream4[stix]]);
             vsums += (__v4sf)_mm_set_epi64x(packed_scores34, packed_scores12);
         }
-        for (stix = min_run; stix < stream1.size(); ++stix)
+        // 1 done, doing 2,3,4
+        for (; stix < min_run234; ++stix)
         {
-            vsums[0] += sigs[stream1[stix]];
+            auto packed_scores12 = pack_2f(0, sigs[stream2[stix]]);
+            auto packed_scores34 = pack_2f(sigs[stream3[stix]], sigs[stream4[stix]]);
+            vsums += (__v4sf)_mm_set_epi64x(packed_scores34, packed_scores12);
         }
-        for (stix = min_run; stix < stream2.size(); ++stix)
+        // 1,2 done, doing 3,4
+        for (; stix < min_run34; ++stix)
         {
-            vsums[1] += sigs[stream2[stix]];
+            auto packed_scores12 = 0;// pack_2f(0, 0);
+            auto packed_scores34 = pack_2f(sigs[stream3[stix]], sigs[stream4[stix]]);
+            vsums += (__v4sf)_mm_set_epi64x(packed_scores34, packed_scores12);
         }
-        for (stix = min_run; stix < stream3.size(); ++stix)
+        // 1,2,3 done, doing 4
+        for (; stix < stream4.size(); ++stix)
         {
-            vsums[2] += sigs[stream3[stix]];
-        }
-        for (stix = min_run; stix < stream4.size(); ++stix)
-        {
-            vsums[3] += sigs[stream4[stix]];
+            auto packed_scores12 = 0;//pack_2f(0, 0);
+            auto packed_scores34 = pack_2f(0, sigs[stream4[stix]]);
+            vsums += (__v4sf)_mm_set_epi64x(packed_scores34, packed_scores12);
         }
     }
 
@@ -115,7 +124,8 @@ void calc_min_max_4(
     __v4su prev = (__v4su)_mm_setzero_si128();
 
     auto stix = 0u;
-    for (; stix < min_run; ++stix)
+    // doing 1,2,3,4
+    for (; stix < min_run1234; ++stix)
     {
         auto packed_scores12 = pack_2f(sigs[stream1[stix]], sigs[stream2[stix]]);
         auto packed_scores34 = pack_2f(sigs[stream3[stix]], sigs[stream4[stix]]);
@@ -129,58 +139,53 @@ void calc_min_max_4(
         _acc += scores * divisor;
         _max = _mm_max_ps(_max, _acc);
     }
-    for (stix = min_run; stix < stream1.size(); ++stix)
+    // 1 done, doing 2,3,4
+    penalty[0] = 0.0;
+    divisor[0] = 0.0;
+    for (; stix < min_run234; ++stix)
     {
-        auto packed_score = pack_2f(sigs[stream1[stix]], 0);
-        auto scores = (__v4sf)_mm_set_epi64x(0, packed_score);
-        auto ix = prev;
-        ix[0] = stream1[stix];
+        auto packed_scores12 = pack_2f(0, sigs[stream2[stix]]);
+        auto packed_scores34 = pack_2f(sigs[stream3[stix]], sigs[stream4[stix]]);
+        auto scores = (__v4sf)_mm_set_epi64x(packed_scores34, packed_scores12);
+        __v4su ix = (__v4su)_mm_set_epi32(stream4[stix], stream3[stix], stream2[stix], 0);
         _acc += penalty * (__v4sf)_mm_cvtepi32_ps((__m128i)(ix - prev));
         _min = _mm_min_ps(_min, _acc);
 
-        prev[0] = ix[0] + 1;
+        prev = ix + 1;
 
         _acc += scores * divisor;
         _max = _mm_max_ps(_max, _acc);
     }
-    for (stix = min_run; stix < stream2.size(); ++stix)
+    // 1,2 done, doing 3,4
+    penalty[1] = 0.0;
+    divisor[1] = 0.0;
+    for (; stix < min_run34; ++stix)
     {
-        auto packed_score = pack_2f(0, sigs[stream2[stix]]);
-        auto scores = (__v4sf)_mm_set_epi64x(0, packed_score);
-        auto ix = prev;
-        ix[1] = stream2[stix];
+        auto packed_scores12 = 0;//pack_2f(0, 0);
+        auto packed_scores34 = pack_2f(sigs[stream3[stix]], sigs[stream4[stix]]);
+        auto scores = (__v4sf)_mm_set_epi64x(packed_scores34, packed_scores12);
+        __v4su ix = (__v4su)_mm_set_epi32(stream4[stix], stream3[stix], 0, 0);
         _acc += penalty * (__v4sf)_mm_cvtepi32_ps((__m128i)(ix - prev));
         _min = _mm_min_ps(_min, _acc);
 
-        prev[1] = ix[1] + 1;
+        prev = ix + 1;
 
         _acc += scores * divisor;
         _max = _mm_max_ps(_max, _acc);
     }
-    for (stix = min_run; stix < stream3.size(); ++stix)
+    // 1,2,3 done, doing 4
+    penalty[2] = 0.0;
+    divisor[2] = 0.0;
+    for (; stix < stream4.size(); ++stix)
     {
-        auto packed_score = pack_2f(sigs[stream3[stix]], 0);
-        auto scores = (__v4sf)_mm_set_epi64x(packed_score, 0);
-        auto ix = prev;
-        ix[2] = stream3[stix];
+        auto packed_scores12 = 0;//pack_2f(0, 0);
+        auto packed_scores34 = pack_2f(0, sigs[stream4[stix]]);
+        auto scores = (__v4sf)_mm_set_epi64x(packed_scores34, packed_scores12);
+        __v4su ix = (__v4su)_mm_set_epi32(stream4[stix], 0, 0, 0);
         _acc += penalty * (__v4sf)_mm_cvtepi32_ps((__m128i)(ix - prev));
         _min = _mm_min_ps(_min, _acc);
 
-        prev[2] = ix[2] + 1;
-
-        _acc += scores * divisor;
-        _max = _mm_max_ps(_max, _acc);
-    }
-    for (stix = min_run; stix < stream4.size(); ++stix)
-    {
-        auto packed_score = pack_2f(0, sigs[stream4[stix]]);
-        auto scores = (__v4sf)_mm_set_epi64x(packed_score, 0);
-        auto ix = prev;
-        ix[3] = stream4[stix];
-        _acc += penalty * (__v4sf)_mm_cvtepi32_ps((__m128i)(ix - prev));
-        _min = _mm_min_ps(_min, _acc);
-
-        prev[3] = ix[3] + 1;
+        prev = ix + 1;
 
         _acc += scores * divisor;
         _max = _mm_max_ps(_max, _acc);
