@@ -85,4 +85,13 @@ add_executable( data_builder
     src/data_builder.cpp
 )
 
+add_executable( gt_check
+    src/gt_check.cpp
+)
+
+add_executable( rank_compressor
+    src/rank_compressor.cpp
+)
+set_target_properties( rank_compressor PROPERTIES COMPILE_FLAGS -mavx )
+
 ################################################################################
