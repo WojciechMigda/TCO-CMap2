@@ -21,3 +21,5 @@ ranksBySig*
 run_seq
 run_conc
 data_builder
+gt_check
+rank_compressor
