@@ -57,6 +57,16 @@ __m128 abs_mask(void)
     return _mm_castsi128_ps(_mm_srli_epi32(minus1, 1));
 }
 
+static __inline void __attribute__((__gnu_inline__, __always_inline__))
+_mm_stream_ss(float * fp, float f)
+{
+    union fi
+    {
+        float f;
+        int i;
+    } fi = {f};
+    _mm_stream_si32((int *)fp, fi.i);
+}
 
 // invariant: streams are passed in ascending order of their sizes.
 static inline
@@ -191,29 +201,15 @@ void calc_min_max_4(
         _max = _mm_max_ps(_max, _acc);
     }
 
-    union fi
-    {
-        float f;
-        int i;
-    };
-    _mm_stream_si32((int *)&omin1, (union fi){_min[0]}.i);
-    _mm_stream_si32((int *)&omin2, (union fi){_min[1]}.i);
-    _mm_stream_si32((int *)&omin3, (union fi){_min[2]}.i);
-    _mm_stream_si32((int *)&omin4, (union fi){_min[3]}.i);
+    _mm_stream_ss(&omin1, _min[0]);
+    _mm_stream_ss(&omin2, _min[1]);
+    _mm_stream_ss(&omin3, _min[2]);
+    _mm_stream_ss(&omin4, _min[3]);
 
-    _mm_stream_si32((int *)&omax1, (union fi){_max[0]}.i);
-    _mm_stream_si32((int *)&omax2, (union fi){_max[1]}.i);
-    _mm_stream_si32((int *)&omax3, (union fi){_max[2]}.i);
-    _mm_stream_si32((int *)&omax4, (union fi){_max[3]}.i);
-
-//    omin1 = _min[0];
-//    omin2 = _min[1];
-//    omin3 = _min[2];
-//    omin4 = _min[3];
-//    omax1 = _max[0];
-//    omax2 = _max[1];
-//    omax3 = _max[2];
-//    omax4 = _max[3];
+    _mm_stream_ss(&omax1, _max[0]);
+    _mm_stream_ss(&omax2, _max[1]);
+    _mm_stream_ss(&omax3, _max[2]);
+    _mm_stream_ss(&omax4, _max[3]);
 }
 
 
