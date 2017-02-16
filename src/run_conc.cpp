@@ -25,6 +25,7 @@
 #include "simd.hpp"
 #include "likely.h"
 #include "unsafevector.hpp"
+#include "memalign.hpp"
 
 #include "cpplinq.hpp"
 
@@ -58,6 +59,7 @@ enum {NSIGS = 476251};
 enum { PARAM_ROWS_PER_CHUNK_INT = 40000 };
 enum { PARAM_ROWS_PER_CHUNK_DBL = 20000 };
 
+enum { XMM_ALIGN = 16 };
 
 using size_type = std::size_t;
 using ssize_type = ssize_t;
@@ -240,8 +242,6 @@ void worker(worker_ctx_t * ctx_p)
     auto const & gene_buckets = ctx.gene_buckets;
     auto const & proc_order = ctx.proc_order;
 
-//    auto mins = static_cast<float *>(malloc(sizeof (float) * NQSTREAMS));
-//    auto maxs = static_cast<float *>(malloc(sizeof (float) * NQSTREAMS));
     auto mins = ctx.mins;
     auto maxs = ctx.maxs;
 
@@ -316,7 +316,7 @@ void worker(worker_ctx_t * ctx_p)
                 _wtks = (wtks[0] - wtks[1]) / 2;
             }
             //ctx.owtks[ret_ix++] = _wtks;
-            _mm_stream_ss(&ctx.owtks[ret_ix], _wtks);
+            mm_stream_ss(&ctx.owtks[ret_ix], _wtks);
             ++ret_ix;
 
             _wtks = 0.;
@@ -324,7 +324,7 @@ void worker(worker_ctx_t * ctx_p)
             {
                 _wtks = (wtks[2] - wtks[3]) / 2;
             }
-            _mm_stream_ss(&ctx.owtks[ret_ix], _wtks);
+            mm_stream_ss(&ctx.owtks[ret_ix], _wtks);
             ++ret_ix;
 
         }
@@ -342,7 +342,7 @@ void worker(worker_ctx_t * ctx_p)
             {
                 _wtks = (wtks[0] - wtks[1]) / 2;
             }
-            _mm_stream_ss(&ctx.owtks[ret_ix], _wtks);
+            mm_stream_ss(&ctx.owtks[ret_ix], _wtks);
             ++ret_ix;
         }
 
@@ -390,9 +390,9 @@ void producer(producer_ctx_t const & ctx)
 
     auto worker_ctx_initialize = [NQRY, NQSTREAMS, &ctx](worker_ctx_t & wctx)
     {
-        wctx.sigs = static_cast<float *>(malloc(BATCH_SZ * NGENES * sizeof (float)));
-        wctx.ranks = static_cast<std::uint16_t *>(malloc(BATCH_SZ * NGENES * sizeof (std::uint16_t)));
-        wctx.owtks = static_cast<float *>(malloc(BATCH_SZ * NQRY * sizeof (float)));
+        wctx.sigs = static_cast<float *>(aligned_malloc(XMM_ALIGN, BATCH_SZ * NGENES * sizeof (float)));
+        wctx.ranks = static_cast<std::uint16_t *>(aligned_malloc(XMM_ALIGN, BATCH_SZ * NGENES * sizeof (std::uint16_t)));
+        wctx.owtks = static_cast<float *>(aligned_malloc(XMM_ALIGN, BATCH_SZ * NQRY * sizeof (float)));
 
         wctx.q_up_indexed_p = ctx.q_up_indexed;
         wctx.q_dn_indexed_p = ctx.q_dn_indexed;
@@ -428,8 +428,8 @@ void producer(producer_ctx_t const & ctx)
                 return sp[p].size() < sq[q].size();
             });
 
-        wctx.mins = static_cast<float *>(malloc(sizeof (float) * NQSTREAMS));
-        wctx.maxs = static_cast<float *>(malloc(sizeof (float) * NQSTREAMS));
+        wctx.mins = static_cast<float *>(aligned_malloc(XMM_ALIGN, sizeof (float) * NQSTREAMS));
+        wctx.maxs = static_cast<float *>(aligned_malloc(XMM_ALIGN, sizeof (float) * NQSTREAMS));
     };
 
     worker_ctx_initialize(jobs[0].ctx);
