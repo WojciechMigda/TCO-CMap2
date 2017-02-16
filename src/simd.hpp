@@ -190,18 +190,30 @@ void calc_min_max_4(
         _acc += scores * divisor;
         _max = _mm_max_ps(_max, _acc);
     }
-    omin1 = _min[0];
-    omin2 = _min[1];
-    omin3 = _min[2];
-    omin4 = _min[3];
-    omax1 = _max[0];
-    omax2 = _max[1];
-    omax3 = _max[2];
-    omax4 = _max[3];
-//    auto vmask = _mm_cmpgt_ps(_max, _mm_and_ps(abs_mask(), _min));
-//    auto wtks = _mm_or_ps(_mm_and_ps(vmask, _max), _mm_andnot_ps(vmask, _min));
-//    o_wtks[0] = wtks[0];
-//    o_wtks[1] = wtks[1];
+
+    union fi
+    {
+        float f;
+        int i;
+    };
+    _mm_stream_si32((int *)&omin1, (union fi){_min[0]}.i);
+    _mm_stream_si32((int *)&omin2, (union fi){_min[1]}.i);
+    _mm_stream_si32((int *)&omin3, (union fi){_min[2]}.i);
+    _mm_stream_si32((int *)&omin4, (union fi){_min[3]}.i);
+
+    _mm_stream_si32((int *)&omax1, (union fi){_max[0]}.i);
+    _mm_stream_si32((int *)&omax2, (union fi){_max[1]}.i);
+    _mm_stream_si32((int *)&omax3, (union fi){_max[2]}.i);
+    _mm_stream_si32((int *)&omax4, (union fi){_max[3]}.i);
+
+//    omin1 = _min[0];
+//    omin2 = _min[1];
+//    omin3 = _min[2];
+//    omin4 = _min[3];
+//    omax1 = _max[0];
+//    omax2 = _max[1];
+//    omax3 = _max[2];
+//    omax4 = _max[3];
 }
 
 
