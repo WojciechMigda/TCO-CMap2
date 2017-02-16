@@ -311,14 +311,17 @@ void worker(worker_ctx_t * ctx_p)
             auto wtks = _mm_blendv_ps(_min, _max, vmask);
 
             float _wtks = 0.;
-            if (std::signbit(wtks[0]) != std::signbit(wtks[1]))
+            auto const signums = _mm_movemask_ps(wtks);
+//            if (std::signbit(wtks[0]) != std::signbit(wtks[1]))
+            if (((signums & 3) == 1) || ((signums & 3) == 2))
             {
                 _wtks = (wtks[0] - wtks[1]) / 2;
             }
             ctx.owtks[ret_ix++] = _wtks;
 
             _wtks = 0.;
-            if (std::signbit(wtks[2]) != std::signbit(wtks[3]))
+            if (((signums & 0xC) == 8) || ((signums & 0xC) == 4))
+//            if (std::signbit(wtks[2]) != std::signbit(wtks[3]))
             {
                 _wtks = (wtks[2] - wtks[3]) / 2;
             }
@@ -334,7 +337,9 @@ void worker(worker_ctx_t * ctx_p)
             auto wtks = _mm_blendv_ps(_min, _max, vmask);
 
             float _wtks = 0.;
-            if (std::signbit(wtks[0]) != std::signbit(wtks[1]))
+            auto const signums = _mm_movemask_ps(wtks);
+//            if (std::signbit(wtks[0]) != std::signbit(wtks[1]))
+            if (((signums & 3) == 1) || ((signums & 3) == 2))
             {
                 _wtks = (wtks[0] - wtks[1]) / 2;
             }
