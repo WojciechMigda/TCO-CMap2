@@ -52,9 +52,11 @@
 #include <emmintrin.h>
 
 //#define USE_MMAP
+#define USE_PACKED_RANKS
 
 enum {NGENES = 10174};
 enum {NSIGS = 476251};
+enum { NPKRANKS = 8903 }; // ceil(NGENES * 7 / 8)
 
 enum { PARAM_ROWS_PER_CHUNK_INT = 40000 };
 enum { PARAM_ROWS_PER_CHUNK_DBL = 20000 };
@@ -231,6 +233,23 @@ typedef struct
 
 void worker(worker_ctx_t * ctx_p)
 {
+    auto rank_unpk = [](std::uint16_t const * p, std::size_t ix) -> std::uint16_t
+        {
+            if (LIKELY(ix % 8 != 7))
+            {
+                return p[ix - ix / 8] & 0x3FFF;
+            }
+            else
+            {
+                __v8hu v8 = (__v8hu)_mm_loadu_si128((__m128i *)&p[ix - ix / 8 - 7]);
+                std::uint16_t hi = _mm_movemask_epi8((__m128i)v8);
+                hi &= 0x2AAA;
+                std::uint16_t lo = _mm_movemask_epi8(_mm_slli_epi16((__m128i)v8, 1));
+                lo &= 0x2AAA;
+                return hi | (lo >> 1);
+            }
+        };
+
     auto & ctx = *ctx_p;
     std::cout << "Worker " << ctx.id << ", sigs=[" << ctx.SIG_BEGIN << ',' << ctx.SIG_END << ')' << std::endl;
     auto & q_up_indexed = *ctx.q_up_indexed_p;
@@ -249,7 +268,11 @@ void worker(worker_ctx_t * ctx_p)
 
     for (auto six = ctx.SIG_BEGIN; six < ctx.SIG_END; ++six)
     {
+#ifdef USE_PACKED_RANKS
+        auto inv_ranks = &ctx.ranks[(six - ctx.SIG_BEGIN) * NPKRANKS];
+#else
         auto inv_ranks = &ctx.ranks[(six - ctx.SIG_BEGIN) * NGENES];
+#endif
         auto sigs = &ctx.sigs[(six - ctx.SIG_BEGIN) * NGENES];
 
         for (auto qix = 0u; qix < NQSTREAMS; ++qix)
@@ -259,7 +282,11 @@ void worker(worker_ctx_t * ctx_p)
 
         for (auto gix = 0; gix < NGENES; ++gix)
         {
+#ifdef USE_PACKED_RANKS
+            auto inv_rank = rank_unpk(inv_ranks, gix);
+#else
             auto inv_rank = inv_ranks[gix];
+#endif
 
             for (auto q_stream_p : gene_buckets[inv_rank])
             {
@@ -368,7 +395,11 @@ void producer(producer_ctx_t const & ctx)
     std::cout << "Producer " << ctx.cpuid + 1 << ", sigs=[" << ctx.SIG_BEGIN << ',' << ctx.SIG_END << ')' << std::endl;
 
     char const * sigs_fn = "../data/scoresBySigSortedAbsF32";
+#ifdef USE_PACKED_RANKS
+    char const * ranks_fn = "../data/ranksBySigInvPacked";
+#else
     char const * ranks_fn = "../data/ranksBySigInv";
+#endif
 
     typedef struct
     {
@@ -391,7 +422,11 @@ void producer(producer_ctx_t const & ctx)
     auto worker_ctx_initialize = [NQRY, NQSTREAMS, &ctx](worker_ctx_t & wctx)
     {
         wctx.sigs = static_cast<float *>(aligned_malloc(XMM_ALIGN, BATCH_SZ * NGENES * sizeof (float)));
+#ifdef USE_PACKED_RANKS
+        wctx.ranks = static_cast<std::uint16_t *>(aligned_malloc(XMM_ALIGN, BATCH_SZ * NPKRANKS * sizeof (std::uint16_t)));
+#else
         wctx.ranks = static_cast<std::uint16_t *>(aligned_malloc(XMM_ALIGN, BATCH_SZ * NGENES * sizeof (std::uint16_t)));
+#endif
         wctx.owtks = static_cast<float *>(aligned_malloc(XMM_ALIGN, BATCH_SZ * NQRY * sizeof (float)));
 
         wctx.q_up_indexed_p = ctx.q_up_indexed;
@@ -458,9 +493,15 @@ void producer(producer_ctx_t const & ctx)
     {
         std::cout << "Failed to open ranks file " << irank_file << std::endl;
     }
+#ifdef USE_PACKED_RANKS
+    lseek(irank_file, ctx.SIG_BEGIN * NPKRANKS * sizeof (std::uint16_t), SEEK_SET);
+    posix_fadvise(irank_file, ctx.SIG_BEGIN * NPKRANKS * sizeof (std::uint16_t), ctx.SIG_END * NPKRANKS * sizeof (std::uint16_t), POSIX_FADV_SEQUENTIAL);
+    posix_fadvise(irank_file, ctx.SIG_BEGIN * NPKRANKS * sizeof (std::uint16_t), ctx.SIG_END * NPKRANKS * sizeof (std::uint16_t), POSIX_FADV_NOREUSE);
+#else
     lseek(irank_file, ctx.SIG_BEGIN * NGENES * sizeof (std::uint16_t), SEEK_SET);
     posix_fadvise(irank_file, ctx.SIG_BEGIN * NGENES * sizeof (std::uint16_t), ctx.SIG_END * NGENES * sizeof (std::uint16_t), POSIX_FADV_SEQUENTIAL);
     posix_fadvise(irank_file, ctx.SIG_BEGIN * NGENES * sizeof (std::uint16_t), ctx.SIG_END * NGENES * sizeof (std::uint16_t), POSIX_FADV_NOREUSE);
+#endif
 
     auto ofile = open(ctx.o_wtks_fname, O_WRONLY);
     if (UNLIKELY(ofile == -1))
@@ -480,8 +521,13 @@ void producer(producer_ctx_t const & ctx)
 
         load_from_file<float>(
             jobs_p[0]->ctx.sigs, isig_file, six * NGENES, nrows * NGENES);
+#ifdef USE_PACKED_RANKS
+        load_from_file<std::uint16_t>(
+            jobs_p[0]->ctx.ranks, irank_file, six * NPKRANKS, nrows * NPKRANKS);
+#else
         load_from_file<std::uint16_t>(
             jobs_p[0]->ctx.ranks, irank_file, six * NGENES, nrows * NGENES);
+#endif
 
         jobs_p[0]->ctx.SIG_BEGIN = six;
         jobs_p[0]->ctx.SIG_END = six + nrows;
