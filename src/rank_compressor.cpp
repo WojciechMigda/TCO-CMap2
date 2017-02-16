@@ -82,17 +82,6 @@ int main(int argc, char ** argv)
                     orank_row[pix - 5] |= (irank_row[cix] >> 4) << 14;
                     orank_row[pix - 6] |= (irank_row[cix] >> 2) << 14;
                     orank_row[pix - 7] |= (irank_row[cix] >> 0) << 14;
-
-//                    {
-//                        __v8hu v8 = (__v8hu)_mm_loadu_si128((__m128i *)&orank_row[pix - 7]);
-//
-//                        std::uint16_t hi = _mm_movemask_epi8((__m128i)v8);
-//                        hi &= 0x2AAA;
-//                        std::uint16_t lo = _mm_movemask_epi8(_mm_slli_epi16((__m128i)v8, 1));
-//                        lo &= 0x2AAA;
-//                        std::uint16_t unp = hi | (lo >> 1);
-//                        assert(unp == irank_row[cix]);
-//                    }
                 }
                 else
                 {
@@ -100,6 +89,7 @@ int main(int argc, char ** argv)
                 }
             }
 
+            // verification
             for (auto cix = 0u; cix < NGENES; ++cix)
             {
                 auto unp = [](std::uint16_t const * p, std::size_t ix) -> std::uint16_t
@@ -141,5 +131,5 @@ int main(int argc, char ** argv)
     std::cout << "Expected checksums:\n";
     std::cout << "sha1sum ranksBySigInvPacked\n\n";
 
-    std::cout << "???  ranksBySigInvPacked\n\n";
+    std::cout << "61cba3b37f89bd50f820da933bd0eb4cbcfab83b  ranksBySigInvPacked\n\n";
 }
