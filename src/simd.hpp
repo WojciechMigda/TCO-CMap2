@@ -138,10 +138,10 @@ void calc_min_max_4(
     // doing 1,2,3,4
     for (; stix < min_run1234; ++stix)
     {
+        __v4su ix = (__v4su)_mm_set_epi32(stream4[stix], stream3[stix], stream2[stix], stream1[stix]);
         auto packed_scores12 = pack_2f(sigs[stream1[stix]], sigs[stream2[stix]]);
         auto packed_scores34 = pack_2f(sigs[stream3[stix]], sigs[stream4[stix]]);
         auto scores = (__v4sf)_mm_set_epi64x(packed_scores34, packed_scores12);
-        __v4su ix = (__v4su)_mm_set_epi32(stream4[stix], stream3[stix], stream2[stix], stream1[stix]);
         _acc += penalty * (__v4sf)_mm_cvtepi32_ps((__m128i)(ix - prev));
         _min = _mm_min_ps(_min, _acc);
 
@@ -155,10 +155,10 @@ void calc_min_max_4(
     divisor[0] = 0.0;
     for (; stix < min_run234; ++stix)
     {
+        __v4su ix = (__v4su)_mm_set_epi32(stream4[stix], stream3[stix], stream2[stix], 0);
         auto packed_scores12 = pack_2f(0, sigs[stream2[stix]]);
         auto packed_scores34 = pack_2f(sigs[stream3[stix]], sigs[stream4[stix]]);
         auto scores = (__v4sf)_mm_set_epi64x(packed_scores34, packed_scores12);
-        __v4su ix = (__v4su)_mm_set_epi32(stream4[stix], stream3[stix], stream2[stix], 0);
         _acc += penalty * (__v4sf)_mm_cvtepi32_ps((__m128i)(ix - prev));
         _min = _mm_min_ps(_min, _acc);
 
@@ -172,10 +172,10 @@ void calc_min_max_4(
     divisor[1] = 0.0;
     for (; stix < min_run34; ++stix)
     {
+        __v4su ix = (__v4su)_mm_set_epi32(stream4[stix], stream3[stix], 0, 0);
         auto packed_scores12 = 0;//pack_2f(0, 0);
         auto packed_scores34 = pack_2f(sigs[stream3[stix]], sigs[stream4[stix]]);
         auto scores = (__v4sf)_mm_set_epi64x(packed_scores34, packed_scores12);
-        __v4su ix = (__v4su)_mm_set_epi32(stream4[stix], stream3[stix], 0, 0);
         _acc += penalty * (__v4sf)_mm_cvtepi32_ps((__m128i)(ix - prev));
         _min = _mm_min_ps(_min, _acc);
 
@@ -189,10 +189,10 @@ void calc_min_max_4(
     divisor[2] = 0.0;
     for (; stix < stream4.size(); ++stix)
     {
+        __v4su ix = (__v4su)_mm_set_epi32(stream4[stix], 0, 0, 0);
         auto packed_scores12 = 0;//pack_2f(0, 0);
         auto packed_scores34 = pack_2f(0, sigs[stream4[stix]]);
         auto scores = (__v4sf)_mm_set_epi64x(packed_scores34, packed_scores12);
-        __v4su ix = (__v4su)_mm_set_epi32(stream4[stix], 0, 0, 0);
         _acc += penalty * (__v4sf)_mm_cvtepi32_ps((__m128i)(ix - prev));
         _min = _mm_min_ps(_min, _acc);
 
