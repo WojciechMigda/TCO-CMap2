@@ -221,7 +221,7 @@ typedef struct
     std::uint16_t * ranks;
     float * mins;
     float * maxs;
-    double * owtks;
+    float * owtks;
     std::vector<query_stream_t> q_streams;
     std::vector<stream_index_t> proc_order;
     std::vector<query_stream_t *> gene_buckets[NGENES];
@@ -310,7 +310,7 @@ void worker(worker_ctx_t * ctx_p)
             //auto wtks = _mm_or_ps(_mm_and_ps(vmask, _max), _mm_andnot_ps(vmask, _min));
             auto wtks = _mm_blendv_ps(_min, _max, vmask);
 
-            double _wtks = 0.;
+            float _wtks = 0.;
             if (std::signbit(wtks[0]) != std::signbit(wtks[1]))
             {
                 _wtks = (wtks[0] - wtks[1]) / 2;
@@ -333,7 +333,7 @@ void worker(worker_ctx_t * ctx_p)
             //auto wtks = _mm_or_ps(_mm_and_ps(vmask, _max), _mm_andnot_ps(vmask, _min));
             auto wtks = _mm_blendv_ps(_min, _max, vmask);
 
-            double _wtks = 0.;
+            float _wtks = 0.;
             if (std::signbit(wtks[0]) != std::signbit(wtks[1]))
             {
                 _wtks = (wtks[0] - wtks[1]) / 2;
@@ -390,7 +390,7 @@ void producer(producer_ctx_t const & ctx)
     {
         wctx.sigs = static_cast<float *>(malloc(BATCH_SZ * NGENES * sizeof (float)));
         wctx.ranks = static_cast<std::uint16_t *>(malloc(BATCH_SZ * NGENES * sizeof (std::uint16_t)));
-        wctx.owtks = static_cast<double *>(malloc(BATCH_SZ * NQRY * sizeof (double)));
+        wctx.owtks = static_cast<float *>(malloc(BATCH_SZ * NQRY * sizeof (float)));
 
         wctx.q_up_indexed_p = ctx.q_up_indexed;
         wctx.q_dn_indexed_p = ctx.q_dn_indexed;
@@ -465,7 +465,7 @@ void producer(producer_ctx_t const & ctx)
     {
         std::cout << "Failed to open output WTKS file " << ctx.o_wtks_fname << std::endl;
     }
-    lseek(ofile, ctx.SIG_BEGIN * NQRY * sizeof (double), SEEK_SET);
+    lseek(ofile, ctx.SIG_BEGIN * NQRY * sizeof (float), SEEK_SET);
 
 
     ////////////////////////////////////////////////////////////////////////////
@@ -491,13 +491,13 @@ void producer(producer_ctx_t const & ctx)
         jobs_p[0]->worker = std::thread(worker, &jobs_p[0]->ctx);
         set_affinity(jobs_p[0]->worker.native_handle(), ctx.cpuid);
 
-        wtks_saver<double>(ofile, jobs_p[1]->ctx.owtks, jobs_p[1]->ctx.SIG_BEGIN * NQRY, (jobs_p[1]->ctx.SIG_END - jobs_p[1]->ctx.SIG_BEGIN) * NQRY);
+        wtks_saver<float>(ofile, jobs_p[1]->ctx.owtks, jobs_p[1]->ctx.SIG_BEGIN * NQRY, (jobs_p[1]->ctx.SIG_END - jobs_p[1]->ctx.SIG_BEGIN) * NQRY);
 
         std::swap(jobs_p[0], jobs_p[1]);
     }
 
     jobs_p[1]->worker.join();
-    wtks_saver<double>(ofile, jobs_p[1]->ctx.owtks, jobs_p[1]->ctx.SIG_BEGIN * NQRY, (jobs_p[1]->ctx.SIG_END - jobs_p[1]->ctx.SIG_BEGIN) * NQRY);
+    wtks_saver<float>(ofile, jobs_p[1]->ctx.owtks, jobs_p[1]->ctx.SIG_BEGIN * NQRY, (jobs_p[1]->ctx.SIG_END - jobs_p[1]->ctx.SIG_BEGIN) * NQRY);
 
 
     ////////////////////////////////////////////////////////////////////////////
@@ -586,7 +586,7 @@ int main(int argc, char ** argv)
     }
     // truncate
     {
-        auto len = NSIGS * q_up_indexed.size() * sizeof (double);
+        auto len = NSIGS * q_up_indexed.size() * sizeof (float);
         auto out = fileno(ofile);
         if ((fallocate(out, 0, 0, len) == -1) && (errno == EOPNOTSUPP))
         {
