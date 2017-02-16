@@ -276,7 +276,8 @@ CMAP2Updated::getWTKScomb(std::vector<std::string> & q_up, std::vector<std::stri
             __v4sf _min = _mm_load_ps(&mins[4 * b4_ix]);
             __v4sf _max = _mm_load_ps(&maxs[4 * b4_ix]);
             auto vmask = _mm_cmpgt_ps(_max, _mm_and_ps(abs_mask(), _min));
-            auto wtks = _mm_or_ps(_mm_and_ps(vmask, _max), _mm_andnot_ps(vmask, _min));
+            //auto wtks = _mm_or_ps(_mm_and_ps(vmask, _max), _mm_andnot_ps(vmask, _min));
+            auto wtks = _mm_blendv_ps(_min, _max, vmask);
 
             double _wtks = 0.;
             if (std::signbit(wtks[0]) != std::signbit(wtks[1]))
@@ -319,7 +320,8 @@ CMAP2Updated::getWTKScomb(std::vector<std::string> & q_up, std::vector<std::stri
             auto _max = (__v4sf)_mm_cvtsi64_si128(pack_2f(maxs[4 * N4 + 0], maxs[4 * N4 + 1]));
 
             auto vmask = _mm_cmpgt_ps(_max, _mm_and_ps(abs_mask(), _min));
-            auto wtks = _mm_or_ps(_mm_and_ps(vmask, _max), _mm_andnot_ps(vmask, _min));
+            //auto wtks = _mm_or_ps(_mm_and_ps(vmask, _max), _mm_andnot_ps(vmask, _min));
+            auto wtks = _mm_blendv_ps(_min, _max, vmask);
 
             double _wtks = 0.;
             if (std::signbit(wtks[0]) != std::signbit(wtks[1]))
