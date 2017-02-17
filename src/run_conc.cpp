@@ -251,7 +251,7 @@ void worker(worker_ctx_t * ctx_p)
         };
 
     auto & ctx = *ctx_p;
-    std::cout << "Worker " << ctx.id << ", sigs=[" << ctx.SIG_BEGIN << ',' << ctx.SIG_END << ')' << std::endl;
+    //std::cout << "Worker " << ctx.id << ", sigs=[" << ctx.SIG_BEGIN << ',' << ctx.SIG_END << ')' << std::endl;
     auto & q_up_indexed = *ctx.q_up_indexed_p;
 
     auto const NQRY = q_up_indexed.size();
@@ -374,7 +374,7 @@ void worker(worker_ctx_t * ctx_p)
         }
 
     }
-    _mm_sfence();
+//    _mm_sfence();
 }
 
 typedef struct
